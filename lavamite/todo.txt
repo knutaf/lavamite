@@ -1,0 +1,21 @@
+- split windows comm into a separate library
+- understand shared better, and make sure we're using it right
+
+    knutaf2
+    token.consumer.key = "pAeROf1TLat6zyVk82Ww";
+    token.consumer.secret = "gPnk6LutpFds0aLuoTJBHy9GAIaGYn09o8Ogu9REaE";
+    token.key = "576620271-IK5nrKUZEY5Wy25JlTVQtJ11jHrGqPYNC0ur7uY7";
+    token.secret = "FXKgFEoKTXujKaUtvfsIoSIVE3bBmMdiKq5YI6AnZImAG";
+
+    /*
+    lavamite
+    "twitterInfo": {
+        "auth": {
+            "apiKey": "7EDq8OUZdJOF0VGqobrsP8OgU",
+            "accountKey": "2336034588-snfCR83Uz9J9aApKLOc6n1QBEBlrn1c8KgK36hz",
+            "accountSecret": "8wQG40eb2TtKyTQc4VnCGr1GXtwTIdepj8dZPo7pqHUKm",
+            "apiSecret": "1tjfjmhISeL1TUNpUlzY0jjaHrHOZ1ZlkeU9BMWOkv41sgHkhL"
+        }
+    },
+    */
+

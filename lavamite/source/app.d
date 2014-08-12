@@ -10,6 +10,7 @@ import std.random;
 import std.algorithm;
 import std.json;
 import core.thread;
+import std.typecons;
 
 import core.sys.windows.windows;
 import windows_serial;
@@ -27,9 +28,15 @@ TwitterInfo g_twitterInfo;
 
 immutable uint MINS_PER_HOUR = 60;
 
+enum ActiveTimeSurplusHandling
+{
+    AtEnd = 0,
+    AtBeginning = 1,
+}
+
 pure Duration stripFracSeconds(Duration d)
 {
-    return d - dur!"nsecs"(d.fracSec().nsecs());
+    return d - dur!"nsecs"(d.split!("seconds", "nsecs").nsecs);
 }
 
 //
@@ -49,7 +56,7 @@ string formatTimeToSeconds(SysTime t)
 
 string formatDurationToHoursMins(Duration d)
 {
-    return format("%d:%02d", d.total!"hours"(), d.minutes());
+    return format("%d:%02d", d.total!"hours"(), d.split!("minutes").minutes);
 }
 
 string formatRoundFolder(shared Round r)
@@ -194,8 +201,21 @@ Usage: lavamite.exe [-com com_port_name] [-cam device_id] [-dry]
     -com: specify COM port to use to control, e.g. COM3
     -cam: ID of the camera device to use for photos. use takephoto.exe -enum
           to see which devices are present
+    -enumCams: enumerate camera devices on this computer, then exit
     -live: if not specified, only does a dry run with output`,
     msg);
+}
+
+Duration getDrySleepDuration(Duration original)
+{
+    if (original > dur!"minutes"(15))
+    {
+        return dur!"seconds"(5);
+    }
+    else
+    {
+        return dur!"msecs"(100);
+    }
 }
 
 //
@@ -209,7 +229,7 @@ void privateSleep(Duration d)
 
     if (!g_forReals)
     {
-        d = dur!"seconds"(5);
+        d = getDrySleepDuration(originalDuration);
     }
 
     Thread.sleep(d);
@@ -222,7 +242,8 @@ void privateSleep(Duration d)
 // timer halfway, under the assumption that the entire wait period did not
 // elapse
 //
-bool sleepWithExitCheck(Duration d)
+alias Tuple!(bool, "isExitRequested", Duration, "timeSlept") sleepHowLongWithExitCheck_Return;
+sleepHowLongWithExitCheck_Return sleepHowLongWithExitCheck(Duration d)
 {
     assert(!d.isNegative());
 
@@ -230,8 +251,10 @@ bool sleepWithExitCheck(Duration d)
 
     if (!g_forReals)
     {
-        d = dur!"seconds"(5);
+        d = getDrySleepDuration(d);
     }
+
+    SysTime tBeforeSleep = g_clock.currTime;
 
     bool didReceive = receiveTimeout(d, (bool dummy) { });
 
@@ -242,7 +265,20 @@ bool sleepWithExitCheck(Duration d)
 
     g_clock.advance(fakeSleepDuration);
 
-    return didReceive;
+    sleepHowLongWithExitCheck_Return ret;
+    ret.isExitRequested = didReceive;
+    ret.timeSlept = g_clock.currTime - tBeforeSleep;
+    return ret;
+}
+
+//
+// simple wrapper for callers who don't care about how long they slept for
+// out of the requested duration
+//
+bool sleepWithExitCheck(Duration d)
+{
+    auto sleepResult = sleepHowLongWithExitCheck(d);
+    return sleepResult.isExitRequested;
 }
 
 int main(string[] args)
@@ -289,6 +325,10 @@ int main(string[] args)
                 usage("need argument for -cam");
                 return 1;
             }
+        }
+        else if (cmp(args[i], "-enumCams") == 0)
+        {
+            return LavaCam.enumerateCameras(takePhotoPath);
         }
         else if (cmp(args[i], "-live") == 0)
         {
@@ -364,6 +404,8 @@ int main(string[] args)
     {
         try
         {
+            bool inSomePhase = false;
+
             //
             // on every iteration of the main loop, we will be in one of 2
             // situations:
@@ -403,55 +445,111 @@ int main(string[] args)
                 Duration cooldownTime = dur!"minutes"(uniform(4 * MINS_PER_HOUR, 5 * MINS_PER_HOUR));
 
                 Duration cappedLastCooldownTime = min(g_currentRound.cooldownTime, dur!"hours"(4));
-                ulong minWarmUpSeconds = ((40 * cappedLastCooldownTime) / 100).total!"seconds"();
-                ulong maxWarmUpSeconds = ((50 * cappedLastCooldownTime) / 100).total!"seconds"();
-                Duration warmUpTime = dur!"seconds"(uniform(minWarmUpSeconds, maxWarmUpSeconds));
 
                 //
+                // TODO: fix doc
                 // a fixed time to get to steady state, which is known to get
                 // the lamp bubbling nicely
                 //
-                Duration timeToStabilization = dur!"hours"(3);
+                Duration stabilizationTime = dur!"hours"(3);
+
+                //
+                // in cooler times, 40-50% of 4 hours works. in warmer times,
+                // 30-40% of 4 hours seems to work
+                //
+                // TODO: experimenting with 252-271% of 4 hours, using inactive
+                // warmup time too
+                //
+                ulong minWarmUpSeconds = ((252 * cappedLastCooldownTime) / 100).total!"seconds"();
+                ulong maxWarmUpSeconds = ((271 * cappedLastCooldownTime) / 100).total!"seconds"();
+                Duration warmUpActiveTime = dur!"seconds"(uniform(minWarmUpSeconds, maxWarmUpSeconds));
+                Duration warmUpInactiveTime;
+                ActiveTimeSurplusHandling activeTimeSurplusHandling = ActiveTimeSurplusHandling.AtEnd;
+
+                //
+                // choose whether to flicker the lamp on and off during the
+                // warm-up time
+                //
+                // TODO: for now we will do this all the time, to test it out
+                //
+                //if (dice(50, 50) == 0)
+                if (dice(0, 100) == 0)
+                {
+                    warmUpInactiveTime = Duration.zero;
+
+                    // TODO doc
+                    stabilizationTime -= warmUpActiveTime;
+                }
+                else
+                {
+                    //
+                    // choose whether there is the same amount of inactive time
+                    // as active time, or if there is more active time. we will
+                    // never choose less active time, because we want the lamp
+                    // to get more time heating
+                    //
+                    // TODO: for now always choose to have equal active and
+                    // inactive time
+                    //
+                    if (dice(100, 0) == 0)
+                    {
+                        warmUpInactiveTime = warmUpActiveTime;
+                        // TODO: doc
+                        stabilizationTime = dur!"minutes"(90);
+                    }
+                    else
+                    {
+                        ulong warmUpActiveSeconds = warmUpActiveTime.total!"seconds"();
+                        warmUpInactiveTime = dur!"seconds"(uniform((25 * warmUpActiveSeconds) / 100, (50 * warmUpActiveSeconds) / 100));
+
+                        //
+                        // choose what to do with the surplus active time.
+                        // either do it all at the beginning, or all at the end
+                        //
+                        // TODO: for now, we put it all at the end
+                        activeTimeSurplusHandling = cast(ActiveTimeSurplusHandling) dice(100, 0);
+                    }
+
+                }
 
                 //
                 // thus enters the new round
                 //
-                setCurrentRound(new Round(
-                                    g_currentRound.number + 1,
-                                    g_clock.currTime,
-                                    g_clock.currTime,
-                                    g_currentRound.cooldownTime,
-                                    warmUpTime,
-                                    timeToStabilization,
-                                    cooldownTime));
+                // TODO: align
+                setCurrentRound(
+                    new Round(
+                        g_currentRound.number + 1,   // round number
+                        g_clock.currTime,            // start time
+                        g_clock.currTime,            // original start time
+                        g_currentRound.cooldownTime, // prior cooldown time
+                        warmUpActiveTime,                  // warmup active time
+                        warmUpInactiveTime,             // warmup inactive time
+                        activeTimeSurplusHandling,
+                        warmUpActiveTime,                  // remaining active
+                        warmUpInactiveTime,             // remaining inactive
+                        stabilizationTime,         // stabilization time
+                        cooldownTime));               // cooldown time
 
                 log(format(
-                    "********* STARTING ROUND: warmUpTime: %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
-                    g_currentRound.warmUpTime,
-                    g_currentRound.timeToStabilization,
+                    "********* STARTING ROUND: warm-up active time: %s, warm-up inactive time: %s, surplus: %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
+                    g_currentRound.warmUpActiveTime,
+                    g_currentRound.warmUpInactiveTime,
+                    g_currentRound.activeTimeSurplusHandling == ActiveTimeSurplusHandling.AtEnd ? "at end" : "at beginning",
+                    g_currentRound.stabilizationTime,
                     g_currentRound.cooldownTime,
                     g_currentRound.priorCooldownTime));
             }
             else
             {
                 log(format(
-                    "********* CONTINUING ROUND, %s in: warmUpTime: %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
+                    "********* CONTINUING ROUND, %s in: warm-up active time: %s, warm-up inactive time: %s, surplus: %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
                     stripFracSeconds(g_clock.currTime - g_currentRound.startTime),
-                    g_currentRound.warmUpTime,
-                    g_currentRound.timeToStabilization,
+                    g_currentRound.warmUpActiveTime,
+                    g_currentRound.warmUpInactiveTime,
+                    g_currentRound.activeTimeSurplusHandling == ActiveTimeSurplusHandling.AtEnd ? "at end" : "at beginning",
+                    g_currentRound.stabilizationTime,
                     g_currentRound.cooldownTime,
                     g_currentRound.priorCooldownTime));
-            }
-
-            //
-            // when continuing a round, if we determine that we're in the
-            // stabilization time (either warmup or further stabilization),
-            // the lamp needs to be on
-            //
-            if (g_currentRound.stabilizationInterval.contains(g_clock.currTime))
-            {
-                powerSwitch.turnOnPower();
-                notifyPhotoThread(true);
             }
 
             //
@@ -462,6 +560,102 @@ int main(string[] args)
             //
             if (g_currentRound.warmUpInterval.contains(g_clock.currTime))
             {
+                inSomePhase = true;
+
+                //
+                // if the current time is within the warm-up interval, then
+                // it stands to reason that there should be remaining time to
+                // warm up.
+                //
+                assert(g_currentRound.remainingWarmUpActiveTime > Duration.zero);
+
+                //
+                // photos are always being taken during warm-up and
+                // stabilization
+                //
+                notifyPhotoThread(true);
+
+                bool isExiting = false;
+                Duration minCycleTime = dur!"minutes"(1);
+                Duration maxCycleTime = dur!"minutes"(10);
+                while (!isExiting && g_currentRound.remainingWarmUpActiveTime > Duration.zero)
+                {
+                    //
+                    // start each active/inactive cycle with the lamp on. if
+                    // we are doing a 0-inactive time cycle, then this will
+                    // only be called once
+                    //
+                    powerSwitch.turnOnPower();
+
+                    // TODO: doc
+                    if (g_currentRound.activeTimeSurplusHandling == ActiveTimeSurplusHandling.AtBeginning && g_currentRound.remainingWarmUpActiveTime > g_currentRound.warmUpInactiveTime)
+                    {
+                        Duration activeTimeAtBeginningDuration = g_currentRound.warmUpInactiveTime - g_currentRound.remainingWarmUpActiveTime;
+
+                        auto sleepResult = sleepHowLongWithExitCheck(activeTimeAtBeginningDuration);
+                        isExiting = sleepResult.isExitRequested;
+                        g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
+                    }
+
+                    if (!isExiting)
+                    {
+
+                        if (g_currentRound.remainingWarmUpInactiveTime > minCycleTime)
+                        {
+                            Duration thisCycleActiveTime = min(dur!"seconds"(uniform(minCycleTime.total!"seconds"(), maxCycleTime.total!"seconds"())), g_currentRound.remainingWarmUpActiveTime);
+                            log(format("active cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleActiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
+
+                            auto sleepResult = sleepHowLongWithExitCheck(thisCycleActiveTime);
+                            isExiting = sleepResult.isExitRequested;
+                            g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
+
+                            if (!isExiting)
+                            {
+                                Duration thisCycleInactiveTime = min(dur!"seconds"(uniform(minCycleTime.total!"seconds"(), maxCycleTime.total!"seconds"())), g_currentRound.remainingWarmUpInactiveTime);
+
+                                powerSwitch.turnOffPower();
+                                log(format("inactive cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleInactiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
+
+                                sleepResult = sleepHowLongWithExitCheck(thisCycleInactiveTime);
+                                isExiting = sleepResult.isExitRequested;
+                                g_currentRound.deductRemainingWarmUpInactiveTime(sleepResult.timeSlept);
+                            }
+                        }
+                        else
+                        {
+                            log(format("Leaving on to finish warmup active time: %s", g_currentRound.remainingWarmUpActiveTime));
+                            auto sleepResult = sleepHowLongWithExitCheck(g_currentRound.remainingWarmUpActiveTime);
+                            isExiting = sleepResult.isExitRequested;
+                            g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
+                        }
+                    }
+                }
+
+                if (isExiting)
+                {
+                    log(format("Exiting during warmup. Remaining active time: %s, inactive time: %s", g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
+                    break;
+                }
+
+                //
+                // with the lamp warmed up as much as we want, take the money
+                // shot and post it for the world to see
+                //
+                powerSwitch.turnOnPower();
+                takeAndPostPhoto(camera);
+            }
+
+            //
+            // finish warming up the lamp all the way, so it cools down into
+            // its settled state rather than freezing in a formation.
+            //
+            if (g_clock.currTime < g_currentRound.stabilizationInterval.end)
+            {
+                inSomePhase = true;
+
+                powerSwitch.turnOnPower();
+                notifyPhotoThread(true);
+
                 //
                 // when continuing a round, determine how far into the round
                 // it is now. calculate the time remaining in this phase of
@@ -474,30 +668,9 @@ int main(string[] args)
                 // add 5 sec to the time we wait, which will comfortably put
                 // us into the next phase, once this phase is completed
                 //
-                Duration remainingWarmUpTime = g_currentRound.warmUpInterval.end - g_clock.currTime + dur!"seconds"(5);
-                log(format("Leaving on for %s", stripFracSeconds(remainingWarmUpTime)));
-                if (sleepWithExitCheck(remainingWarmUpTime))
-                {
-                    break;
-                }
-
-                //
-                // with the lamp warmed up as much as we want, take the money
-                // shot and post it for the world to see
-                //
-                takeAndPostPhoto(camera);
-            }
-
-            if (g_currentRound.stabilizationInterval.contains(g_clock.currTime))
-            {
                 Duration remainingStabilizationTime = g_currentRound.stabilizationInterval.end - g_clock.currTime + dur!"seconds"(5);
-
-                //
-                // finish warming up the lamp all the way, so it cools down
-                // into its settled state rather than freezing in a
-                // formation.
-                //
                 log(format("Leaving on for remaining time to stabilization, %s", stripFracSeconds(remainingStabilizationTime)));
+
                 if (sleepWithExitCheck(remainingStabilizationTime))
                 {
                     break;
@@ -505,14 +678,16 @@ int main(string[] args)
             }
 
             //
-            // always turn off lamp at the end of the round regardless of
+            // always turn off lamp at the end of stabilization regardless of
             // which phases we're skipping
             //
             powerSwitch.turnOffPower();
             notifyPhotoThread(false);
 
-            if (g_currentRound.cooldownInterval.contains(g_clock.currTime))
+            if (g_clock.currTime < g_currentRound.cooldownInterval.end)
             {
+                inSomePhase = true;
+
                 Duration remainingCooldownTime = g_currentRound.cooldownInterval.end - g_clock.currTime + dur!"seconds"(5);
                 log(format("Cooling down for %s until next session", stripFracSeconds(remainingCooldownTime)));
                 if (sleepWithExitCheck(remainingCooldownTime))
@@ -520,6 +695,8 @@ int main(string[] args)
                     break;
                 }
             }
+
+            assert(inSomePhase);
         }
         catch (Throwable ex)
         {
@@ -583,7 +760,11 @@ void processConfigFile()
                         g_clock.currTime,     // start time
                         g_clock.currTime,     // original start time
                         Duration.zero(),      // prior cooldown time
-                        dur!"seconds"(1),     // warmup time
+                        dur!"seconds"(1),     // warmup active time
+                        Duration.zero(),      // warmup inactive time
+                        ActiveTimeSurplusHandling.AtEnd,
+                        dur!"seconds"(1),     // remaining warmup active time
+                        Duration.zero(),      // remaining warmup inactive
                         dur!"seconds"(1),     // stabilization time
                         dur!"hours"(4));      // cooldown time
 
@@ -655,8 +836,12 @@ void processConfigFile()
             g_clock.currTime - (lastActionTime - rs.startTime),
             rs.startTime,
             rs.priorCooldownTime,
-            rs.warmUpTime,
-            rs.timeToStabilization,
+            rs.warmUpActiveTime,
+            rs.warmUpInactiveTime,
+            rs.activeTimeSurplusHandling,
+            rs.remainingWarmUpActiveTime,
+            rs.remainingWarmUpInactiveTime,
+            rs.stabilizationTime,
             rs.cooldownTime);
 
     setCurrentRound(r);
@@ -701,7 +886,8 @@ void tweetTextAndPhoto(string textToTweet, string photoPath)
 
     if (g_forReals)
     {
-        Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, [photoPath], parms);
+        // TODO: re-enable when live
+        //Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, [photoPath], parms);
     }
 }
 
@@ -728,7 +914,7 @@ void takeAndPostPhoto(shared LavaCam camera)
             "Round %d. Prior cooldown time: %s. Warm-up time: %s.",
             g_currentRound.number,
             formatDurationToHoursMins(g_currentRound.priorCooldownTime),
-            formatDurationToHoursMins(g_currentRound.warmUpTime)),
+            formatDurationToHoursMins(g_currentRound.warmUpActiveTime)),
         photoPath);
 }
 
@@ -889,8 +1075,12 @@ class Round
     private long m_startTime;
     private long m_originalStartTime;
     private Duration m_priorCooldownTime;
-    private Duration m_warmUpTime;
-    private Duration m_timeToStabilization;
+    private Duration m_warmUpActiveTime;
+    private Duration m_warmUpInactiveTime;
+    private ActiveTimeSurplusHandling m_activeTimeSurplusHandling;
+    private Duration m_remainingWarmUpActiveTime;
+    private Duration m_remainingWarmUpInactiveTime;
+    private Duration m_stabilizationTime;
     private Duration m_cooldownTime;
 
     public this(
@@ -898,8 +1088,12 @@ class Round
         SysTime startTime,
         SysTime originalStartTime,
         Duration priorCooldownTime,
-        Duration warmUpTime,
-        Duration timeToStabilization,
+        Duration warmUpActiveTime,
+        Duration warmUpInactiveTime,
+        ActiveTimeSurplusHandling activeTimeSurplusHandling,
+        Duration remainingWarmUpActiveTime,
+        Duration remainingWarmUpInactiveTime,
+        Duration stabilizationTime,
         Duration cooldownTime)
     {
         this.m_number = number;
@@ -907,8 +1101,12 @@ class Round
         m_originalStartTime = originalStartTime.stdTime;
 
         m_priorCooldownTime = priorCooldownTime;
-        m_warmUpTime = warmUpTime;
-        m_timeToStabilization = timeToStabilization;
+        m_warmUpActiveTime = warmUpActiveTime;
+        m_warmUpInactiveTime = warmUpInactiveTime;
+        m_activeTimeSurplusHandling = activeTimeSurplusHandling;
+        m_remainingWarmUpActiveTime = remainingWarmUpActiveTime;
+        m_remainingWarmUpInactiveTime = remainingWarmUpInactiveTime;
+        m_stabilizationTime = stabilizationTime;
         m_cooldownTime = cooldownTime;
     }
 
@@ -933,36 +1131,78 @@ class Round
     }
 
     //
-    // stabilization time (entire time the lamp is on) + cooldown time
-    // (entire time the lamp is off at the end)
+    // warm-up time, then stabilization time, then cooldown time
     //
     @property public shared pure Interval!SysTime wholeRoundInterval()
     {
-        return Interval!SysTime(startTime(), timeToStabilization() + cooldownTime());
+        return Interval!SysTime(startTime(), warmUpInterval().length + stabilizationInterval().length + cooldownInterval().length);
     }
 
-    @property public shared pure Duration warmUpTime()
+    @property public shared pure Duration warmUpActiveTime()
     {
-        return m_warmUpTime;
+        return m_warmUpActiveTime;
     }
 
-    //
-    // note that the warm up interval is fully contained in the stabilization
-    // interval
-    //
+    @property public shared pure Duration warmUpInactiveTime()
+    {
+        return m_warmUpInactiveTime;
+    }
+
+    @property public shared pure ActiveTimeSurplusHandling activeTimeSurplusHandling()
+    {
+        return m_activeTimeSurplusHandling;
+    }
+
+    @property public shared pure Duration remainingWarmUpActiveTime()
+    {
+        return m_remainingWarmUpActiveTime;
+    }
+
+    @property public shared pure Duration remainingWarmUpInactiveTime()
+    {
+        return m_remainingWarmUpInactiveTime;
+    }
+
+    public shared Duration deductRemainingWarmUpActiveTime(Duration d)
+    {
+        return deductTime(&m_remainingWarmUpActiveTime, d);
+    }
+
+    public shared Duration deductRemainingWarmUpInactiveTime(Duration d)
+    {
+        return deductTime(&m_remainingWarmUpInactiveTime, d);
+    }
+
+    private static Duration deductTime(shared Duration* from, Duration d)
+    {
+        if (d > *from)
+        {
+            d = *from;
+        }
+
+        //
+        // this should not go negative
+        //
+        assert(d <= *from);
+        Duration d1 = *from;
+        *from = stripFracSeconds(d1 - d);
+
+        return *from;
+    }
+
     @property public shared pure Interval!SysTime warmUpInterval()
     {
-        return Interval!SysTime(startTime(), warmUpTime());
+        return Interval!SysTime(startTime(), warmUpActiveTime() + warmUpInactiveTime());
     }
 
-    @property public shared pure Duration timeToStabilization()
+    @property public shared pure Duration stabilizationTime()
     {
-        return m_timeToStabilization;
+        return m_stabilizationTime;
     }
 
     @property public shared pure Interval!SysTime stabilizationInterval()
     {
-        return Interval!SysTime(startTime(), timeToStabilization());
+        return Interval!SysTime(warmUpInterval.end(), stabilizationTime());
     }
 
     @property public shared pure Duration cooldownTime()
@@ -975,7 +1215,7 @@ class Round
     //
     @property public shared pure Interval!SysTime cooldownInterval()
     {
-        return Interval!SysTime(stabilizationInterval().end, cooldownTime);
+        return Interval!SysTime(stabilizationInterval().end, cooldownTime());
     }
 
     private shared pure Duration secsSinceRoundStart(SysTime t)
@@ -1000,12 +1240,14 @@ class Round
                 "startTime" : JSONValue(startTime().toISOString()),
                 "originalStartTime" : JSONValue(originalStartTime().toISOString()),
                 "priorCooldownSeconds" : JSONValue(priorCooldownTime().total!"seconds"()),
-                "warmUpSeconds" : JSONValue(warmUpTime().total!"seconds"()),
-                "stabilizationSeconds" : JSONValue(timeToStabilization().total!"seconds"()),
-                "cooldownSeconds" : JSONValue(cooldownTime().total!"seconds"()),
+                "warmUpActiveSeconds" : JSONValue(warmUpActiveTime().total!"seconds"()),
+                "warmUpInactiveSeconds" : JSONValue(warmUpInactiveTime().total!"seconds"()),
+                "activeTimeSurplusHandling" : JSONValue(activeTimeSurplusHandling()),
+                "remainingWarmUpActiveSeconds" : JSONValue(remainingWarmUpActiveTime().total!"seconds"()),
+                "remainingWarmUpInactiveSeconds" : JSONValue(remainingWarmUpInactiveTime().total!"seconds"()),
+                "stabilizationSeconds" : JSONValue(stabilizationTime().total!"seconds"()),
+                "cooldownSeconds" : JSONValue(cooldownTime().total!"seconds"())
             ]);
-
-        root.object["round"].type = JSON_TYPE.UINTEGER;
 
         return root;
     }
@@ -1015,14 +1257,17 @@ class Round
         //
         // we know we'll never store something larger than a uint in here
         //
-        root.object["round"].type = JSON_TYPE.UINTEGER;
-        uint round = cast(uint) root.object["round"].uinteger;
+        uint round = cast(uint) root.object["round"].integer;
 
         SysTime startTime = SysTime.fromISOString(root.object["startTime"].str);
         SysTime originalStartTime = SysTime.fromISOString(root.object["originalStartTime"].str);
         Duration priorCooldownTime = dur!"seconds"(root.object["priorCooldownSeconds"].integer);
-        Duration warmUpTime = dur!"seconds"(root.object["warmUpSeconds"].integer);
-        Duration timeToStabilization = dur!"seconds"(root.object["stabilizationSeconds"].integer);
+        Duration warmUpActiveTime = dur!"seconds"(root.object["warmUpActiveSeconds"].integer);
+        Duration warmUpInactiveTime = dur!"seconds"(root.object["warmUpInactiveSeconds"].integer);
+        ActiveTimeSurplusHandling activeTimeSurplusHandling = cast(ActiveTimeSurplusHandling) root.object["activeTimeSurplusHandling"].integer;
+        Duration remainingWarmUpActiveTime = dur!"seconds"(root.object["remainingWarmUpActiveSeconds"].integer);
+        Duration remainingWarmUpInactiveTime = dur!"seconds"(root.object["remainingWarmUpInactiveSeconds"].integer);
+        Duration stabilizationTime = dur!"seconds"(root.object["stabilizationSeconds"].integer);
         Duration cooldownTime = dur!"seconds"(root.object["cooldownSeconds"].integer);
 
         return new Round(
@@ -1030,8 +1275,12 @@ class Round
                        startTime,
                        originalStartTime,
                        priorCooldownTime,
-                       warmUpTime,
-                       timeToStabilization,
+                       warmUpActiveTime,
+                       warmUpInactiveTime,
+                       activeTimeSurplusHandling,
+                       remainingWarmUpActiveTime,
+                       remainingWarmUpInactiveTime,
+                       stabilizationTime,
                        cooldownTime);
     }
 }
@@ -1106,7 +1355,7 @@ class LavaCam
 
         if (!exists(m_takePhotoPath))
         {
-            throw new Exception(format("cannot find %s", m_takePhotoPath));
+            throw new Exception(format("cannot find takephoto.exe at %s", m_takePhotoPath));
         }
     }
 
@@ -1157,6 +1406,21 @@ class LavaCam
         string photoPath = buildPath(formatRoundFolder(g_currentRound), format("%s_%s%s.jpg", currTime.toISOString(), g_currentRound.getRoundAndSecOffset(currTime), fileSuffix));
         takePhoto(photoPath, showLog);
         return photoPath;
+    }
+
+    public static int enumerateCameras(string takePhotoPath)
+    {
+        if (!exists(takePhotoPath))
+        {
+            throw new Exception(format("cannot find takephoto.exe at %s", takePhotoPath));
+        }
+
+        string takePhotoCommand = format("%s -enum", takePhotoPath);
+        auto result = executeShell(takePhotoCommand);
+
+        write(result.output);
+
+        return result.status;
     }
 }
 

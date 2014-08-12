@@ -5,8 +5,4 @@
 	"authors": ["Junkface"],
 	"dependencies": {
 	},
-
-    "lflags": [
-        "/libpath:f:\\dev\\lib",
-    ]
 }
