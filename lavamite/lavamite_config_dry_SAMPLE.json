@@ -1,0 +1,10 @@
+{
+    "twitterInfo": {
+        "auth": {
+            "apiKey": "NNNNNNNNN-abcdefghijklmnopqrstuvwxyzabcdefghijklmn",
+            "consumerSecret": "abcdefghijklmnopqrstuvwxyzabcdefghijklmnop",
+            "apiSecret": "abcdefghjiklmnopqrstuvwxyzabcdefghijklmnopqrs",
+            "consumerKey": "abcdefghijklmnopqrst"
+        }
+    }
+}
