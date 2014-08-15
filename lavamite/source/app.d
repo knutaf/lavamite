@@ -56,7 +56,7 @@ string formatTimeToSeconds(SysTime t)
 
 string formatDurationToHoursMins(Duration d)
 {
-    return format("%d:%02d", d.total!"hours"(), d.split!("minutes").minutes);
+    return format("%d:%02d", d.total!"hours"(), d.split!("hours", "minutes").minutes);
 }
 
 string formatRoundFolder(shared Round r)
@@ -447,11 +447,10 @@ int main(string[] args)
                 Duration cappedLastCooldownTime = min(g_currentRound.cooldownTime, dur!"hours"(4));
 
                 //
-                // TODO: fix doc
-                // a fixed time to get to steady state, which is known to get
-                // the lamp bubbling nicely
+                // The time to get to steady state, which is known to get the
+                // lamp bubbling nicely
                 //
-                Duration stabilizationTime = dur!"hours"(3);
+                Duration stabilizationTime;
 
                 //
                 // in cooler times, 40-50% of 4 hours works. in warmer times,
@@ -477,34 +476,58 @@ int main(string[] args)
                 {
                     warmUpInactiveTime = Duration.zero;
 
-                    // TODO doc
-                    stabilizationTime -= warmUpActiveTime;
+                    //
+                    // 3 hours is enough time to get the lamp stable, but we
+                    // have been continuously active for a while, so subtract
+                    // out that time
+                    //
+                    stabilizationTime = dur!"hours"(3) - warmUpActiveTime;
                 }
                 else
                 {
                     //
                     // choose whether there is the same amount of inactive time
                     // as active time, or if there is more active time. we will
-                    // never choose less active time, because we want the lamp
-                    // to get more time heating
+                    // never choose less active time, because the lamp needs a
+                    // decent amount of heat to produce formations
                     //
                     // TODO: for now always choose to have equal active and
                     // inactive time
                     //
                     if (dice(100, 0) == 0)
                     {
+                        //
+                        // same active time as inactive time
+                        //
+
                         warmUpInactiveTime = warmUpActiveTime;
-                        // TODO: doc
+
+                        //
+                        // even though the lamp may have been intermittently
+                        // active for several hours, the interleaved cooling
+                        // periods mess with this. stabilization really needs
+                        // a continuous period of active time. 90 minutes is
+                        // pretty good
+                        //
                         stabilizationTime = dur!"minutes"(90);
                     }
                     else
                     {
+                        //
+                        // more active time than inactive time
+                        //
+
                         ulong warmUpActiveSeconds = warmUpActiveTime.total!"seconds"();
+
+                        //
+                        // inactive time is 25-50% of active time
+                        //
                         warmUpInactiveTime = dur!"seconds"(uniform((25 * warmUpActiveSeconds) / 100, (50 * warmUpActiveSeconds) / 100));
 
                         //
+                        // since there is more active time than inactive,
                         // choose what to do with the surplus active time.
-                        // either do it all at the beginning, or all at the end
+                        // either do it all at the beginning or all at the end
                         //
                         // TODO: for now, we put it all at the end
                         activeTimeSurplusHandling = cast(ActiveTimeSurplusHandling) dice(100, 0);
@@ -515,20 +538,19 @@ int main(string[] args)
                 //
                 // thus enters the new round
                 //
-                // TODO: align
                 setCurrentRound(
                     new Round(
                         g_currentRound.number + 1,   // round number
                         g_clock.currTime,            // start time
                         g_clock.currTime,            // original start time
                         g_currentRound.cooldownTime, // prior cooldown time
-                        warmUpActiveTime,                  // warmup active time
-                        warmUpInactiveTime,             // warmup inactive time
+                        warmUpActiveTime,            // warmup active time
+                        warmUpInactiveTime,          // warmup inactive time
                         activeTimeSurplusHandling,
-                        warmUpActiveTime,                  // remaining active
-                        warmUpInactiveTime,             // remaining inactive
-                        stabilizationTime,         // stabilization time
-                        cooldownTime));               // cooldown time
+                        warmUpActiveTime,            // remaining active
+                        warmUpInactiveTime,          // remaining inactive
+                        stabilizationTime,           // stabilization time
+                        cooldownTime));              // cooldown time
 
                 log(format(
                     "********* STARTING ROUND: warm-up active time: %s, warm-up inactive time: %s, surplus: %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
@@ -553,10 +575,10 @@ int main(string[] args)
             }
 
             //
-            // wait for a while to warm up the lamp partway, but not so much
-            // that it goes into "steady state" (with bubbles continually
-            // rising and falling). the whole point of this program is to
-            // capture the formations before it's stabilized
+            // warm-up phase: wait for a while to warm up the lamp partway, but
+            // not so much that it goes into "steady state" (with bubbles
+            // continually rising and falling). the whole point of this program
+            // is to capture the formations before it's stabilized
             //
             if (g_currentRound.warmUpInterval.contains(g_clock.currTime))
             {
@@ -575,63 +597,98 @@ int main(string[] args)
                 //
                 notifyPhotoThread(true);
 
-                bool isExiting = false;
-                Duration minCycleTime = dur!"minutes"(1);
-                Duration maxCycleTime = dur!"minutes"(10);
-                while (!isExiting && g_currentRound.remainingWarmUpActiveTime > Duration.zero)
+                //
+                // if we have more active time left than total original
+                // inactive time, then that means we have "surplus" active
+                // time. this block handles the case where we've chosen
+                // above to consume this surplus active time all at the
+                // beginning
+                //
+                if (g_currentRound.activeTimeSurplusHandling == ActiveTimeSurplusHandling.AtBeginning && g_currentRound.remainingWarmUpActiveTime > g_currentRound.warmUpInactiveTime)
+                {
+                    //
+                    // consume enough to bring the remaining active time
+                    // down to the same amount of inactive time
+                    //
+                    Duration activeTimeAtBeginningDuration = g_currentRound.remainingWarmUpActiveTime - g_currentRound.warmUpInactiveTime;
+
+                    log(format("consuming surplus active time at the beginning: %s", activeTimeAtBeginningDuration));
+
+                    powerSwitch.turnOnPower();
+                    auto sleepResult = sleepHowLongWithExitCheck(activeTimeAtBeginningDuration);
+                    g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
+
+                    if (sleepResult.isExitRequested)
+                    {
+                        break;
+                    }
+                }
+
+                //
+                // this loop consumes the warm-up active time, either in one
+                // continuous length or by alternating active and inactive
+                // periods, depending on what was chosen above
+                //
+                bool isExitRequested = false;
+                while (g_currentRound.remainingWarmUpActiveTime > Duration.zero)
                 {
                     //
                     // start each active/inactive cycle with the lamp on. if
-                    // we are doing a 0-inactive time cycle, then this will
-                    // only be called once
+                    // we are doing a 0-inactive time cycle, then this loop
+                    // will only be called once
                     //
                     powerSwitch.turnOnPower();
 
-                    // TODO: doc
-                    if (g_currentRound.activeTimeSurplusHandling == ActiveTimeSurplusHandling.AtBeginning && g_currentRound.remainingWarmUpActiveTime > g_currentRound.warmUpInactiveTime)
+                    //
+                    // if there is significant inactive time left to be
+                    // consumed, do one period of active time followed by one
+                    // period of inactive time
+                    //
+                    Duration minCycleTime = dur!"minutes"(1);
+                    Duration maxCycleTime = dur!"minutes"(10);
+                    if (g_currentRound.remainingWarmUpInactiveTime > minCycleTime)
                     {
-                        Duration activeTimeAtBeginningDuration = g_currentRound.warmUpInactiveTime - g_currentRound.remainingWarmUpActiveTime;
+                        Duration thisCycleActiveTime = min(dur!"seconds"(uniform(minCycleTime.total!"seconds"(), maxCycleTime.total!"seconds"())), g_currentRound.remainingWarmUpActiveTime);
+                        log(format("active cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleActiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
 
-                        auto sleepResult = sleepHowLongWithExitCheck(activeTimeAtBeginningDuration);
-                        isExiting = sleepResult.isExitRequested;
+                        auto sleepResult = sleepHowLongWithExitCheck(thisCycleActiveTime);
                         g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
-                    }
 
-                    if (!isExiting)
-                    {
-
-                        if (g_currentRound.remainingWarmUpInactiveTime > minCycleTime)
+                        isExitRequested = sleepResult.isExitRequested;
+                        if (isExitRequested)
                         {
-                            Duration thisCycleActiveTime = min(dur!"seconds"(uniform(minCycleTime.total!"seconds"(), maxCycleTime.total!"seconds"())), g_currentRound.remainingWarmUpActiveTime);
-                            log(format("active cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleActiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
-
-                            auto sleepResult = sleepHowLongWithExitCheck(thisCycleActiveTime);
-                            isExiting = sleepResult.isExitRequested;
-                            g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
-
-                            if (!isExiting)
-                            {
-                                Duration thisCycleInactiveTime = min(dur!"seconds"(uniform(minCycleTime.total!"seconds"(), maxCycleTime.total!"seconds"())), g_currentRound.remainingWarmUpInactiveTime);
-
-                                powerSwitch.turnOffPower();
-                                log(format("inactive cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleInactiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
-
-                                sleepResult = sleepHowLongWithExitCheck(thisCycleInactiveTime);
-                                isExiting = sleepResult.isExitRequested;
-                                g_currentRound.deductRemainingWarmUpInactiveTime(sleepResult.timeSlept);
-                            }
+                            break;
                         }
-                        else
+
+                        Duration thisCycleInactiveTime = min(dur!"seconds"(uniform(minCycleTime.total!"seconds"(), maxCycleTime.total!"seconds"())), g_currentRound.remainingWarmUpInactiveTime);
+
+                        powerSwitch.turnOffPower();
+                        log(format("inactive cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleInactiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
+
+                        sleepResult = sleepHowLongWithExitCheck(thisCycleInactiveTime);
+                        g_currentRound.deductRemainingWarmUpInactiveTime(sleepResult.timeSlept);
+
+                        isExitRequested = sleepResult.isExitRequested;
+                        if (isExitRequested)
                         {
-                            log(format("Leaving on to finish warmup active time: %s", g_currentRound.remainingWarmUpActiveTime));
-                            auto sleepResult = sleepHowLongWithExitCheck(g_currentRound.remainingWarmUpActiveTime);
-                            isExiting = sleepResult.isExitRequested;
-                            g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        log(format("Leaving on to consume all warmup active time: %s", g_currentRound.remainingWarmUpActiveTime));
+                        auto sleepResult = sleepHowLongWithExitCheck(g_currentRound.remainingWarmUpActiveTime);
+                        g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
+
+                        isExitRequested = sleepResult.isExitRequested;
+                        if (isExitRequested)
+                        {
+                            break;
                         }
                     }
                 }
 
-                if (isExiting)
+                if (isExitRequested)
                 {
                     log(format("Exiting during warmup. Remaining active time: %s, inactive time: %s", g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
                     break;
