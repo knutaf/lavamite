@@ -4,3 +4,4 @@
 *.obj
 *.lib
 *.ilk
+/lavamite/lavamite_config_dry.json
