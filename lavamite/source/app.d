@@ -20,6 +20,7 @@ import graphite.twitter;
 shared string g_rootPath;
 shared PrivateClock g_clock;
 string g_configFile;
+string g_statusFile;
 shared bool g_forReals;
 Tid g_loggingThread;
 
@@ -344,8 +345,9 @@ int main(string[] args)
     shared LavaCam camera = cast(shared LavaCam)(new LavaCam(camDevice, takePhotoPath));
 
     g_configFile = buildPath(g_rootPath, (g_forReals ? "lavamite_config.json" : "lavamite_config_dry.json"));
+    g_statusFile = buildPath(g_rootPath, (g_forReals ? "lavamite_status.json" : "lavamite_status_dry.json"));
 
-    processConfigFile();
+    processConfigFiles();
 
     //
     // at this point, g_currentRound is set
@@ -412,7 +414,7 @@ int main(string[] args)
             //
             // 1. loaded last round info from a file, so we continue from the
             //    point where the program had last left off. in
-            //    processConfigFile, we adjust the last round info so that
+            //    processConfigFiles, we adjust the last round info so that
             //    its start time is positioned before the current time, so
             //    we can use the current time as an accurate offset into the
             //    round
@@ -782,12 +784,11 @@ int main(string[] args)
 // into the last round the program was running, to let us pick up where we
 // left off
 //
-void processConfigFile()
+void processConfigFiles()
 {
-    Round r;
+    shared Round rs;
     TwitterInfo ti;
     SysTime lastActionTime = g_clock.currTime;
-    bool haveAllLastActionTimeInfo = true;
 
     if (exists(g_configFile))
     {
@@ -799,38 +800,7 @@ void processConfigFile()
         }
         catch (Throwable ex)
         {
-            log(format("Malfomed JSON in config file %s. Must minimally contain Twitter info.", g_configFile));
-            throw ex;
-        }
-
-        try
-        {
-            JSONValue* lastRoundInfo = "lastRoundInfo" in root.object;
-            if (lastRoundInfo !is null)
-            {
-                r = Round.fromJSON(*lastRoundInfo);
-            }
-            else
-            {
-                r = new Round(
-                        0,                    // round number
-                        g_clock.currTime,     // start time
-                        g_clock.currTime,     // original start time
-                        Duration.zero(),      // prior cooldown time
-                        dur!"seconds"(1),     // warmup active time
-                        Duration.zero(),      // warmup inactive time
-                        ActiveTimeSurplusHandling.AtEnd,
-                        dur!"seconds"(1),     // remaining warmup active time
-                        Duration.zero(),      // remaining warmup inactive
-                        dur!"seconds"(1),     // stabilization time
-                        dur!"hours"(4));      // cooldown time
-
-                haveAllLastActionTimeInfo = false;
-            }
-        }
-        catch (Throwable ex)
-        {
-            log(format("Well-formed JSON file %s with incorrect last round info.", g_configFile));
+            log(format("Malfomed JSON in config file %s. Must contain Twitter info.", g_configFile));
             throw ex;
         }
 
@@ -844,6 +814,26 @@ void processConfigFile()
             log(format("Well-formed JSON file %s that does not contain Twitter info. Must fix.", g_configFile));
             throw ex;
         }
+    }
+    else
+    {
+        throw new Exception(format("Missing JSON config file %s. Must contain Twitter info.", g_configFile));
+    }
+
+    if (exists(g_statusFile))
+    {
+        JSONValue root;
+
+        try
+        {
+            root = parseJSON(readText(g_statusFile));
+            log(format("type: %s", root.type));
+        }
+        catch (Throwable ex)
+        {
+            log(format("Malfomed JSON in status file %s.", g_statusFile));
+            throw ex;
+        }
 
         try
         {
@@ -854,33 +844,58 @@ void processConfigFile()
             }
             else
             {
-                haveAllLastActionTimeInfo = false;
+                throw new Exception(format("Well-formed JSON file %s missing malformed lastActionTime (should be ISO string). Must fix.", g_statusFile));
             }
         }
         catch (Throwable ex)
         {
-            log(format("Well-formed JSON file %s with malformed lastActionTime (should be ISO string). Must fix.", g_configFile));
+            log(format("Well-formed JSON file %s with malformed lastActionTime (should be ISO string). Must fix.", g_statusFile));
+            throw ex;
+        }
+
+        try
+        {
+            JSONValue* lastRoundInfo = "lastRoundInfo" in root.object;
+            if (lastRoundInfo !is null)
+            {
+                rs = cast(shared Round)Round.fromJSON(*lastRoundInfo);
+            }
+            else
+            {
+                throw new Exception(format("Well-formed JSON file %s missing last round info. Must fix.", g_statusFile));
+            }
+        }
+        catch (Throwable ex)
+        {
+            log(format("Well-formed JSON file %s with incorrect last round info.", g_statusFile));
             throw ex;
         }
     }
     else
     {
-        throw new Exception(format("Missing JSON config file %s. Must minimally contain Twitter info.", g_configFile));
+        log(format("missing status file %s. starting from scratch.", g_statusFile));
+
+        rs = cast(shared Round) new Round(
+                0,                    // round number
+                g_clock.currTime,     // start time
+                g_clock.currTime,     // original start time
+                Duration.zero(),      // prior cooldown time
+                dur!"seconds"(1),     // warmup active time
+                Duration.zero(),      // warmup inactive time
+                ActiveTimeSurplusHandling.AtEnd,
+                dur!"seconds"(1),     // remaining warmup active time
+                Duration.zero(),      // remaining warmup inactive
+                dur!"seconds"(1),     // stabilization time
+                dur!"hours"(4));      // cooldown time
+
+        //
+        // if missing the status file, put us 1 second after the end of the
+        // last round
+        //
+        lastActionTime = rs.wholeRoundInterval.end + dur!"seconds"(1);
     }
 
     g_twitterInfo = ti;
-
-    shared Round rs = cast(shared Round)r;
-
-    //
-    // if we're missing any of the information to calculate the correct
-    // offset into the last round, we put ourselves after the end of the last
-    // round
-    //
-    if (!haveAllLastActionTimeInfo)
-    {
-        lastActionTime = rs.wholeRoundInterval.end + dur!"seconds"(1);
-    }
 
     //
     // this is really important. shift the round that we loaded from file
@@ -888,7 +903,8 @@ void processConfigFile()
     // into the last round, then adjust the startTime of the round to
     // position the current time at that point.
     //
-    r = new Round(
+    setCurrentRound(
+        new Round(
             rs.number,
             g_clock.currTime - (lastActionTime - rs.startTime),
             rs.startTime,
@@ -899,9 +915,7 @@ void processConfigFile()
             rs.remainingWarmUpActiveTime,
             rs.remainingWarmUpInactiveTime,
             rs.stabilizationTime,
-            rs.cooldownTime);
-
-    setCurrentRound(r);
+            rs.cooldownTime));
 }
 
 void writeConfigFile()
@@ -909,11 +923,10 @@ void writeConfigFile()
     JSONValue root = JSONValue(
         [
             "lastRoundInfo" : g_currentRound.toJSON(),
-            "twitterInfo": g_twitterInfo.toJSON(),
             "lastActionTime": JSONValue(g_clock.currTime.toISOString()),
         ]);
 
-    File outfile = File(g_configFile, "w");
+    File outfile = File(g_statusFile, "w");
     outfile.write(root.toPrettyString());
 }
 
