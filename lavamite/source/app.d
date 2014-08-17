@@ -11,6 +11,7 @@ import std.algorithm;
 import std.json;
 import core.thread;
 import std.typecons;
+import std.array;
 
 import core.sys.windows.windows;
 import windows_serial;
@@ -26,6 +27,7 @@ Tid g_loggingThread;
 
 shared Round g_currentRound;
 TwitterInfo g_twitterInfo;
+TuningConfig g_tuningConfig;
 
 immutable uint MINS_PER_HOUR = 60;
 
@@ -33,6 +35,14 @@ enum ActiveTimeSurplusHandling
 {
     AtEnd = 0,
     AtBeginning = 1,
+}
+
+enum ActiveTimeHandling
+{
+    ZeroInactive = 0,
+    EqualInactive = 1,
+    SurplusAtEnd = 2,
+    SurplusAtBeginning = 3,
 }
 
 pure Duration stripFracSeconds(Duration d)
@@ -787,7 +797,8 @@ int main(string[] args)
 void processConfigFiles()
 {
     shared Round rs;
-    TwitterInfo ti;
+    TwitterInfo twitterInfo;
+    TuningConfig tuningConfig;
     SysTime lastActionTime = g_clock.currTime;
 
     if (exists(g_configFile))
@@ -800,24 +811,35 @@ void processConfigFiles()
         }
         catch (Throwable ex)
         {
-            log(format("Malfomed JSON in config file %s. Must contain Twitter info.", g_configFile));
+            log(format("Malfomed JSON in config file %s. Must contain Twitter info and tuning config.", g_configFile));
             throw ex;
         }
 
         try
         {
-            JSONValue twitterInfo = root.object["twitterInfo"];
-            ti = TwitterInfo.fromJSON(twitterInfo);
+            JSONValue jsonTwitterInfo = root.object["twitterInfo"];
+            twitterInfo = TwitterInfo.fromJSON(jsonTwitterInfo);
         }
         catch (Throwable ex)
         {
             log(format("Well-formed JSON file %s that does not contain Twitter info. Must fix.", g_configFile));
             throw ex;
         }
+
+        try
+        {
+            JSONValue jsonTuningConfig = root.object["tuningConfig"];
+            tuningConfig = TuningConfig.fromJSON(jsonTuningConfig);
+        }
+        catch (Throwable ex)
+        {
+            log(format("Well-formed JSON file %s that does not contain tuning config. Must fix.", g_configFile));
+            throw ex;
+        }
     }
     else
     {
-        throw new Exception(format("Missing JSON config file %s. Must contain Twitter info.", g_configFile));
+        throw new Exception(format("Missing JSON config file %s. Must contain Twitter info and tuning config.", g_configFile));
     }
 
     if (exists(g_statusFile))
@@ -895,7 +917,8 @@ void processConfigFiles()
         lastActionTime = rs.wholeRoundInterval.end + dur!"seconds"(1);
     }
 
-    g_twitterInfo = ti;
+    g_twitterInfo = twitterInfo;
+    g_tuningConfig = tuningConfig;
 
     //
     // this is really important. shift the round that we loaded from file
@@ -1403,6 +1426,115 @@ class TwitterInfo
             auth.object["apiSecret"].str,
             auth.object["accountKey"].str,
             auth.object["accountSecret"].str);
+    }
+}
+
+ulong[] ulongArrayFromJSON(JSONValue root, ulong exactLength)
+{
+    if (root.type != JSON_TYPE.ARRAY)
+    {
+        throw new Exception("invalid ulong array in JSON -- needs to be array");
+    }
+
+    JSONValue[] arrayContents = root.array;
+    if (arrayContents.length != exactLength)
+    {
+        throw new Exception(format("invalid ulong array in JSON -- needs to have exactly %u elements, not %u", exactLength, arrayContents.length));
+    }
+
+    ulong[] arr;
+    arr.length = exactLength;
+
+    for (int i = 0; i < exactLength; i++)
+    {
+        if (arrayContents[i].integer < 0)
+        {
+            throw new Exception(format("invalid ulong array in JSON -- cannot have negative value in element %u", i));
+        }
+
+        arr[i] = arrayContents[i].integer;
+    }
+
+    return arr;
+}
+
+public JSONValue ulongArrayToJSON(ulong[] arr)
+{
+    JSONValue root;
+    root.array = array(arr.map!(x => JSONValue(x))());
+    return root;
+}
+
+struct NumberRange
+{
+    ulong min;
+    ulong max;
+
+    public static NumberRange fromJSON(JSONValue root)
+    {
+        ulong[] arr = ulongArrayFromJSON(root, 2);
+
+        NumberRange nr;
+        nr.min = arr[0];
+        nr.max = arr[1];
+        return nr;
+    }
+
+    public JSONValue toJSON()
+    {
+        return ulongArrayToJSON([this.min, this.max]);
+    }
+}
+
+struct DurationRange
+{
+    Duration min;
+    Duration max;
+
+    public static DurationRange fromJSON(string units)(JSONValue root)
+    {
+        NumberRange nr = NumberRange.fromJSON(root);
+
+        DurationRange dr;
+        dr.min = dur!units(nr.min);
+        dr.max = dur!units(nr.max);
+        return dr;
+    }
+
+    public JSONValue toJSON(string units)()
+    {
+        NumberRange nr;
+        nr.min = this.min.total!units();
+        nr.max = this.max.total!units();
+        return nr.toJSON();
+    }
+}
+
+struct TuningConfig
+{
+    DurationRange rangeCooldownTime;
+    Duration stabilizationTime;
+    DurationRange rangeWarmUpActiveTimeWithZeroInactive;
+    DurationRange rangeWarmUpActiveTimeWithEqualInactive;
+    DurationRange rangeWarmUpActiveTimeWithSurplusAfter;
+    DurationRange rangeWarmUpActiveTimeWithSurplusBefore;
+    NumberRange rangeWarmUpInactivePercentOfActiveSurplusAfter;
+    NumberRange rangeWarmUpInactivePercentOfActiveSurplusBefore;
+    ulong[] choicesWarmUpTimeHandling;
+
+    public static TuningConfig fromJSON(JSONValue root)
+    {
+        TuningConfig ti;
+
+        ti.rangeCooldownTime = DurationRange.fromJSON!"minutes"(root.object["rangeOfCooldownMinutes"]);
+        ti.stabilizationTime = dur!"minutes"(root.object["stabilizationMinutes"].integer);
+        ti.rangeWarmUpActiveTimeWithZeroInactive = DurationRange.fromJSON!"seconds"(root.object["rangeOfWarmUpActiveSecondsZeroInactive"]);
+        ti.rangeWarmUpActiveTimeWithEqualInactive = DurationRange.fromJSON!"seconds"(root.object["rangeOfWarmUpActiveSecondsEqualInactive"]);
+        ti.rangeWarmUpActiveTimeWithSurplusAfter = DurationRange.fromJSON!"seconds"(root.object["rangeOfWarmUpActiveSecondsSurplusAfter"]);
+        ti.rangeWarmUpActiveTimeWithSurplusBefore = DurationRange.fromJSON!"seconds"(root.object["rangeOfWarmUpActiveSecondsSurplusBefore"]);
+        ti.choicesWarmUpTimeHandling = ulongArrayFromJSON(root.object["choicesWarmUpTimeHandling"], ActiveTimeHandling.max+1);
+
+        return ti;
     }
 }
 
