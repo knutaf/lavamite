@@ -31,18 +31,12 @@ TuningConfig g_tuningConfig;
 
 immutable uint MINS_PER_HOUR = 60;
 
-enum ActiveTimeSurplusHandling
-{
-    AtEnd = 0,
-    AtBeginning = 1,
-}
-
-enum ActiveTimeHandling
+enum WarmUpTimeHandling
 {
     ZeroInactive = 0,
     EqualInactive = 1,
-    SurplusAtEnd = 2,
-    SurplusAtBeginning = 3,
+    SurplusAfter = 2,
+    SurplusBefore = 3,
 }
 
 pure Duration stripFracSeconds(Duration d)
@@ -434,7 +428,7 @@ int main(string[] args)
             //
             if (!g_currentRound.wholeRoundInterval.contains(g_clock.currTime))
             {
-                //
+                // TODO: a lot of comment updates needed
                 // choose all the parameters for the new round: cooldown
                 // time, warmup time, and total time till stabilization.
                 // these parameters have been deduced empirically
@@ -454,15 +448,13 @@ int main(string[] args)
                 // take a while to stabilize the lamp till it's bubbling at
                 // steady state.
                 //
-                Duration cooldownTime = dur!"minutes"(uniform(4 * MINS_PER_HOUR, 5 * MINS_PER_HOUR));
-
-                Duration cappedLastCooldownTime = min(g_currentRound.cooldownTime, dur!"hours"(4));
+                Duration cooldownTime = g_tuningConfig.rangeCooldownTime.randomDuration!"minutes"();
 
                 //
                 // The time to get to steady state, which is known to get the
                 // lamp bubbling nicely
                 //
-                Duration stabilizationTime;
+                Duration stabilizationTime = g_tuningConfig.stabilizationTime;
 
                 //
                 // in cooler times, 40-50% of 4 hours works. in warmer times,
@@ -471,80 +463,36 @@ int main(string[] args)
                 // TODO: experimenting with 252-271% of 4 hours, using inactive
                 // warmup time too
                 //
-                ulong minWarmUpSeconds = ((252 * cappedLastCooldownTime) / 100).total!"seconds"();
-                ulong maxWarmUpSeconds = ((271 * cappedLastCooldownTime) / 100).total!"seconds"();
-                Duration warmUpActiveTime = dur!"seconds"(uniform(minWarmUpSeconds, maxWarmUpSeconds));
+                Duration warmUpActiveTime;
                 Duration warmUpInactiveTime;
-                ActiveTimeSurplusHandling activeTimeSurplusHandling = ActiveTimeSurplusHandling.AtEnd;
 
-                //
-                // choose whether to flicker the lamp on and off during the
-                // warm-up time
-                //
-                // TODO: for now we will do this all the time, to test it out
-                //
-                //if (dice(50, 50) == 0)
-                if (dice(0, 100) == 0)
+                WarmUpTimeHandling warmUpTimeHandling = cast(WarmUpTimeHandling) dice(g_tuningConfig.choicesWarmUpTimeHandling);
+
+                final switch(warmUpTimeHandling)
                 {
-                    warmUpInactiveTime = Duration.zero;
+                    case WarmUpTimeHandling.ZeroInactive:
+                        warmUpActiveTime = g_tuningConfig.rangeWarmUpActiveTimeWithZeroInactive.randomDuration!"seconds"();
+                        warmUpInactiveTime = Duration.zero;
+                    break;
 
-                    //
-                    // 3 hours is enough time to get the lamp stable, but we
-                    // have been continuously active for a while, so subtract
-                    // out that time
-                    //
-                    stabilizationTime = dur!"hours"(3) - warmUpActiveTime;
-                }
-                else
-                {
-                    //
-                    // choose whether there is the same amount of inactive time
-                    // as active time, or if there is more active time. we will
-                    // never choose less active time, because the lamp needs a
-                    // decent amount of heat to produce formations
-                    //
-                    // TODO: for now always choose to have equal active and
-                    // inactive time
-                    //
-                    if (dice(100, 0) == 0)
-                    {
-                        //
-                        // same active time as inactive time
-                        //
-
+                    case WarmUpTimeHandling.EqualInactive:
+                        warmUpActiveTime = g_tuningConfig.rangeWarmUpActiveTimeWithEqualInactive.randomDuration!"seconds"();
                         warmUpInactiveTime = warmUpActiveTime;
+                    break;
 
-                        //
-                        // even though the lamp may have been intermittently
-                        // active for several hours, the interleaved cooling
-                        // periods mess with this. stabilization really needs
-                        // a continuous period of active time. 90 minutes is
-                        // pretty good
-                        //
-                        stabilizationTime = dur!"minutes"(90);
-                    }
-                    else
-                    {
-                        //
-                        // more active time than inactive time
-                        //
+                    case WarmUpTimeHandling.SurplusAfter:
+                        warmUpActiveTime = g_tuningConfig.rangeWarmUpActiveTimeWithSurplusAfter.randomDuration!"seconds"();
 
                         ulong warmUpActiveSeconds = warmUpActiveTime.total!"seconds"();
+                        warmUpInactiveTime = dur!"seconds"((g_tuningConfig.rangeWarmUpInactivePercentOfActiveSurplusAfter.random() * warmUpActiveSeconds) / 100);
+                    break;
 
-                        //
-                        // inactive time is 25-50% of active time
-                        //
-                        warmUpInactiveTime = dur!"seconds"(uniform((25 * warmUpActiveSeconds) / 100, (50 * warmUpActiveSeconds) / 100));
+                    case WarmUpTimeHandling.SurplusBefore:
+                        warmUpActiveTime = g_tuningConfig.rangeWarmUpActiveTimeWithSurplusBefore.randomDuration!"seconds"();
 
-                        //
-                        // since there is more active time than inactive,
-                        // choose what to do with the surplus active time.
-                        // either do it all at the beginning or all at the end
-                        //
-                        // TODO: for now, we put it all at the end
-                        activeTimeSurplusHandling = cast(ActiveTimeSurplusHandling) dice(100, 0);
-                    }
-
+                        ulong warmUpActiveSeconds = warmUpActiveTime.total!"seconds"();
+                        warmUpInactiveTime = dur!"seconds"((g_tuningConfig.rangeWarmUpInactivePercentOfActiveSurplusBefore.random() * warmUpActiveSeconds) / 100);
+                    break;
                 }
 
                 //
@@ -558,32 +506,20 @@ int main(string[] args)
                         g_currentRound.cooldownTime, // prior cooldown time
                         warmUpActiveTime,            // warmup active time
                         warmUpInactiveTime,          // warmup inactive time
-                        activeTimeSurplusHandling,
+                        warmUpTimeHandling,          // warmup time handling
                         warmUpActiveTime,            // remaining active
                         warmUpInactiveTime,          // remaining inactive
                         stabilizationTime,           // stabilization time
                         cooldownTime));              // cooldown time
 
-                log(format(
-                    "********* STARTING ROUND: warm-up active time: %s, warm-up inactive time: %s, surplus: %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
-                    g_currentRound.warmUpActiveTime,
-                    g_currentRound.warmUpInactiveTime,
-                    g_currentRound.activeTimeSurplusHandling == ActiveTimeSurplusHandling.AtEnd ? "at end" : "at beginning",
-                    g_currentRound.stabilizationTime,
-                    g_currentRound.cooldownTime,
-                    g_currentRound.priorCooldownTime));
+                log(format("********* STARTING ROUND: %s", g_currentRound.formatPrettyString()));
             }
             else
             {
                 log(format(
-                    "********* CONTINUING ROUND, %s in: warm-up active time: %s, warm-up inactive time: %s, surplus: %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
+                    "********* CONTINUING ROUND, %s in. %s", 
                     stripFracSeconds(g_clock.currTime - g_currentRound.startTime),
-                    g_currentRound.warmUpActiveTime,
-                    g_currentRound.warmUpInactiveTime,
-                    g_currentRound.activeTimeSurplusHandling == ActiveTimeSurplusHandling.AtEnd ? "at end" : "at beginning",
-                    g_currentRound.stabilizationTime,
-                    g_currentRound.cooldownTime,
-                    g_currentRound.priorCooldownTime));
+                    g_currentRound.formatPrettyString()));
             }
 
             //
@@ -616,7 +552,7 @@ int main(string[] args)
                 // above to consume this surplus active time all at the
                 // beginning
                 //
-                if (g_currentRound.activeTimeSurplusHandling == ActiveTimeSurplusHandling.AtBeginning && g_currentRound.remainingWarmUpActiveTime > g_currentRound.warmUpInactiveTime)
+                if (g_currentRound.warmUpTimeHandling == WarmUpTimeHandling.SurplusBefore && g_currentRound.remainingWarmUpActiveTime > g_currentRound.warmUpInactiveTime)
                 {
                     //
                     // consume enough to bring the remaining active time
@@ -652,15 +588,20 @@ int main(string[] args)
                     powerSwitch.turnOnPower();
 
                     //
-                    // if there is significant inactive time left to be
-                    // consumed, do one period of active time followed by one
-                    // period of inactive time
+                    // if there is enough inactive time left to be consumed, do
+                    // one period of active time followed by one period of
+                    // inactive time
                     //
-                    Duration minCycleTime = dur!"minutes"(1);
-                    Duration maxCycleTime = dur!"minutes"(10);
-                    if (g_currentRound.remainingWarmUpInactiveTime > minCycleTime)
+                    if (g_currentRound.remainingWarmUpInactiveTime > g_tuningConfig.rangeActiveCycleTime.min)
                     {
-                        Duration thisCycleActiveTime = min(dur!"seconds"(uniform(minCycleTime.total!"seconds"(), maxCycleTime.total!"seconds"())), g_currentRound.remainingWarmUpActiveTime);
+                        //
+                        // leave on for some active time
+                        //
+                        Duration thisCycleActiveTime =
+                            min(
+                                g_tuningConfig.rangeActiveCycleTime.randomDuration!"seconds"(),
+                                g_currentRound.remainingWarmUpActiveTime);
+
                         log(format("active cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleActiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
 
                         auto sleepResult = sleepHowLongWithExitCheck(thisCycleActiveTime);
@@ -672,7 +613,13 @@ int main(string[] args)
                             break;
                         }
 
-                        Duration thisCycleInactiveTime = min(dur!"seconds"(uniform(minCycleTime.total!"seconds"(), maxCycleTime.total!"seconds"())), g_currentRound.remainingWarmUpInactiveTime);
+                        //
+                        // now leave off for some inactive time
+                        //
+                        Duration thisCycleInactiveTime =
+                            min(
+                                g_tuningConfig.rangeActiveCycleTime.randomDuration!"seconds"(),
+                                g_currentRound.remainingWarmUpInactiveTime);
 
                         powerSwitch.turnOffPower();
                         log(format("inactive cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleInactiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
@@ -849,7 +796,6 @@ void processConfigFiles()
         try
         {
             root = parseJSON(readText(g_statusFile));
-            log(format("type: %s", root.type));
         }
         catch (Throwable ex)
         {
@@ -904,7 +850,7 @@ void processConfigFiles()
                 Duration.zero(),      // prior cooldown time
                 dur!"seconds"(1),     // warmup active time
                 Duration.zero(),      // warmup inactive time
-                ActiveTimeSurplusHandling.AtEnd,
+                WarmUpTimeHandling.ZeroInactive,
                 dur!"seconds"(1),     // remaining warmup active time
                 Duration.zero(),      // remaining warmup inactive
                 dur!"seconds"(1),     // stabilization time
@@ -934,7 +880,7 @@ void processConfigFiles()
             rs.priorCooldownTime,
             rs.warmUpActiveTime,
             rs.warmUpInactiveTime,
-            rs.activeTimeSurplusHandling,
+            rs.warmUpTimeHandling,
             rs.remainingWarmUpActiveTime,
             rs.remainingWarmUpInactiveTime,
             rs.stabilizationTime,
@@ -1170,7 +1116,7 @@ class Round
     private Duration m_priorCooldownTime;
     private Duration m_warmUpActiveTime;
     private Duration m_warmUpInactiveTime;
-    private ActiveTimeSurplusHandling m_activeTimeSurplusHandling;
+    private WarmUpTimeHandling m_warmUpTimeHandling;
     private Duration m_remainingWarmUpActiveTime;
     private Duration m_remainingWarmUpInactiveTime;
     private Duration m_stabilizationTime;
@@ -1183,7 +1129,7 @@ class Round
         Duration priorCooldownTime,
         Duration warmUpActiveTime,
         Duration warmUpInactiveTime,
-        ActiveTimeSurplusHandling activeTimeSurplusHandling,
+        WarmUpTimeHandling warmUpTimeHandling,
         Duration remainingWarmUpActiveTime,
         Duration remainingWarmUpInactiveTime,
         Duration stabilizationTime,
@@ -1196,7 +1142,7 @@ class Round
         m_priorCooldownTime = priorCooldownTime;
         m_warmUpActiveTime = warmUpActiveTime;
         m_warmUpInactiveTime = warmUpInactiveTime;
-        m_activeTimeSurplusHandling = activeTimeSurplusHandling;
+        m_warmUpTimeHandling = warmUpTimeHandling;
         m_remainingWarmUpActiveTime = remainingWarmUpActiveTime;
         m_remainingWarmUpInactiveTime = remainingWarmUpInactiveTime;
         m_stabilizationTime = stabilizationTime;
@@ -1241,9 +1187,9 @@ class Round
         return m_warmUpInactiveTime;
     }
 
-    @property public shared pure ActiveTimeSurplusHandling activeTimeSurplusHandling()
+    @property public shared pure WarmUpTimeHandling warmUpTimeHandling()
     {
-        return m_activeTimeSurplusHandling;
+        return m_warmUpTimeHandling;
     }
 
     @property public shared pure Duration remainingWarmUpActiveTime()
@@ -1325,6 +1271,45 @@ class Round
         return format("r%04d-%05ds", number(), secsIntoRound.total!"seconds"());
     }
 
+    public shared string formatPrettyString()
+    {
+        string output;
+        final switch (this.warmUpTimeHandling)
+        {
+            case WarmUpTimeHandling.ZeroInactive:
+                output = format(
+                    "warm-up active time (zero inactive): %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
+                    this.warmUpActiveTime,
+                    this.stabilizationTime,
+                    this.cooldownTime,
+                    this.priorCooldownTime);
+            break;
+
+            case WarmUpTimeHandling.EqualInactive:
+                output = format(
+                    "warm-up active time (equal inactive): %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
+                    this.warmUpActiveTime,
+                    this.stabilizationTime,
+                    this.cooldownTime,
+                    this.priorCooldownTime);
+            break;
+
+            case WarmUpTimeHandling.SurplusAfter:
+            case WarmUpTimeHandling.SurplusBefore:
+                output = format(
+                    "warm-up active time: %s, warm-up inactive time: %s, surplus at %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
+                    this.warmUpActiveTime,
+                    this.warmUpInactiveTime,
+                    this.warmUpTimeHandling == WarmUpTimeHandling.SurplusAfter ? "end" : "beginning",
+                    this.stabilizationTime,
+                    this.cooldownTime,
+                    this.priorCooldownTime);
+            break;
+        }
+
+        return output;
+    }
+
     public shared JSONValue toJSON()
     {
         JSONValue root = JSONValue(
@@ -1335,7 +1320,7 @@ class Round
                 "priorCooldownSeconds" : JSONValue(priorCooldownTime().total!"seconds"()),
                 "warmUpActiveSeconds" : JSONValue(warmUpActiveTime().total!"seconds"()),
                 "warmUpInactiveSeconds" : JSONValue(warmUpInactiveTime().total!"seconds"()),
-                "activeTimeSurplusHandling" : JSONValue(activeTimeSurplusHandling()),
+                "warmUpTimeHandling" : JSONValue(warmUpTimeHandling()),
                 "remainingWarmUpActiveSeconds" : JSONValue(remainingWarmUpActiveTime().total!"seconds"()),
                 "remainingWarmUpInactiveSeconds" : JSONValue(remainingWarmUpInactiveTime().total!"seconds"()),
                 "stabilizationSeconds" : JSONValue(stabilizationTime().total!"seconds"()),
@@ -1357,7 +1342,7 @@ class Round
         Duration priorCooldownTime = dur!"seconds"(root.object["priorCooldownSeconds"].integer);
         Duration warmUpActiveTime = dur!"seconds"(root.object["warmUpActiveSeconds"].integer);
         Duration warmUpInactiveTime = dur!"seconds"(root.object["warmUpInactiveSeconds"].integer);
-        ActiveTimeSurplusHandling activeTimeSurplusHandling = cast(ActiveTimeSurplusHandling) root.object["activeTimeSurplusHandling"].integer;
+        WarmUpTimeHandling warmUpTimeHandling = cast(WarmUpTimeHandling) root.object["warmUpTimeHandling"].integer;
         Duration remainingWarmUpActiveTime = dur!"seconds"(root.object["remainingWarmUpActiveSeconds"].integer);
         Duration remainingWarmUpInactiveTime = dur!"seconds"(root.object["remainingWarmUpInactiveSeconds"].integer);
         Duration stabilizationTime = dur!"seconds"(root.object["stabilizationSeconds"].integer);
@@ -1370,7 +1355,7 @@ class Round
                        priorCooldownTime,
                        warmUpActiveTime,
                        warmUpInactiveTime,
-                       activeTimeSurplusHandling,
+                       warmUpTimeHandling,
                        remainingWarmUpActiveTime,
                        remainingWarmUpInactiveTime,
                        stabilizationTime,
@@ -1470,6 +1455,11 @@ struct NumberRange
     ulong min;
     ulong max;
 
+    public ulong random()
+    {
+        return uniform(this.min, this.max);
+    }
+
     public static NumberRange fromJSON(JSONValue root)
     {
         ulong[] arr = ulongArrayFromJSON(root, 2);
@@ -1490,6 +1480,13 @@ struct DurationRange
 {
     Duration min;
     Duration max;
+
+    public Duration randomDuration(string unitGranularity)()
+    {
+        return dur!unitGranularity(uniform(
+            this.min.total!unitGranularity(),
+            this.max.total!unitGranularity()));
+    }
 
     public static DurationRange fromJSON(string units)(JSONValue root)
     {
@@ -1517,9 +1514,10 @@ struct TuningConfig
     DurationRange rangeWarmUpActiveTimeWithZeroInactive;
     DurationRange rangeWarmUpActiveTimeWithEqualInactive;
     DurationRange rangeWarmUpActiveTimeWithSurplusAfter;
-    DurationRange rangeWarmUpActiveTimeWithSurplusBefore;
     NumberRange rangeWarmUpInactivePercentOfActiveSurplusAfter;
+    DurationRange rangeWarmUpActiveTimeWithSurplusBefore;
     NumberRange rangeWarmUpInactivePercentOfActiveSurplusBefore;
+    DurationRange rangeActiveCycleTime;
     ulong[] choicesWarmUpTimeHandling;
 
     public static TuningConfig fromJSON(JSONValue root)
@@ -1527,12 +1525,22 @@ struct TuningConfig
         TuningConfig ti;
 
         ti.rangeCooldownTime = DurationRange.fromJSON!"minutes"(root.object["rangeOfCooldownMinutes"]);
+
         ti.stabilizationTime = dur!"minutes"(root.object["stabilizationMinutes"].integer);
+
         ti.rangeWarmUpActiveTimeWithZeroInactive = DurationRange.fromJSON!"seconds"(root.object["rangeOfWarmUpActiveSecondsZeroInactive"]);
+
         ti.rangeWarmUpActiveTimeWithEqualInactive = DurationRange.fromJSON!"seconds"(root.object["rangeOfWarmUpActiveSecondsEqualInactive"]);
+
         ti.rangeWarmUpActiveTimeWithSurplusAfter = DurationRange.fromJSON!"seconds"(root.object["rangeOfWarmUpActiveSecondsSurplusAfter"]);
+        ti.rangeWarmUpInactivePercentOfActiveSurplusAfter = NumberRange.fromJSON(root.object["rangeOfWarmUpInactivePercentOfActiveSurplusAfter"]);
+
         ti.rangeWarmUpActiveTimeWithSurplusBefore = DurationRange.fromJSON!"seconds"(root.object["rangeOfWarmUpActiveSecondsSurplusBefore"]);
-        ti.choicesWarmUpTimeHandling = ulongArrayFromJSON(root.object["choicesWarmUpTimeHandling"], ActiveTimeHandling.max+1);
+        ti.rangeWarmUpInactivePercentOfActiveSurplusBefore = NumberRange.fromJSON(root.object["rangeOfWarmUpInactivePercentOfActiveSurplusBefore"]);
+
+        ti.rangeActiveCycleTime = DurationRange.fromJSON!"seconds"(root.object["rangeActiveCycleTimeSeconds"]);
+
+        ti.choicesWarmUpTimeHandling = ulongArrayFromJSON(root.object["choicesWarmUpTimeHandling"], WarmUpTimeHandling.max+1);
 
         return ti;
     }

@@ -34,15 +34,15 @@
         "_":"spent at the end, after the inactive time is consumed.",
         "_":"TODO: fill in proper values",
         "rangeOfWarmUpActiveSecondsSurplusAfter": [36288, 39024],
-        "rangeOfWarmUpInactivePercentOfActiveSurplusAfter": [25, 50],
+        "rangeOfWarmUpInactivePercentOfActiveSurplusAfter": [85, 95],
 
         "_":"This time range is used when we are doing alternating periods",
         "_":"of turning the lamp on and off, where the overall active time is",
         "_":"greater than the inactive time, and surplus active time is",
         "_":"spent at the beginning, before starting to alternate.",
         "_":"TODO: fill in proper values",
-        "rangeOfWarmUpActiveSecondsSurplusBefore": [36288, 39024],
-        "rangeOfWarmUpInactivePercentOfActiveSurplusBefore": [25, 50],
+        "rangeOfWarmUpActiveSecondsSurplusBefore": [14400, 18000],
+        "rangeOfWarmUpInactivePercentOfActiveSurplusBefore": [60, 75],
 
         "_":"These are the choices for how to assign warm-up time, as an",
         "_":"array of relative weights:",
@@ -53,7 +53,11 @@
         "_":"   time taken after all inactive time is spent",
         "_":"3: more active time than inactive time, and the surplus active",
         "_":"   time taken at the beginning",
-        "choicesWarmUpTimeHandling": [0, 100, 0, 0],
+        "choicesWarmUpTimeHandling": [25, 25, 25, 25],
+
+        "_":"When alternating between having the lamp on and off, how long or",
+        "_":"short can the period be? Switching every 1-10 minutes each time.",
+        "rangeActiveCycleTimeSeconds": [60, 600],
 
         "_":"end"
     }
