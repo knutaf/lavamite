@@ -939,7 +939,7 @@ void takeAndPostPhoto(shared LavaCam camera)
     {
         try
         {
-            photoPath = camera.takePhotoToPhotosFolder("-posted", true);
+            photoPath = camera.takePhotoToPhotosFolder("-POSTED", true);
             break;
         }
         catch (Throwable ex)
