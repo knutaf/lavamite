@@ -948,6 +948,7 @@ void takeAndPostPhoto(shared LavaCam camera)
         }
     }
 
+    // TODO: text needs to be updated
     tweetTextAndPhoto(
         format(
             "Round %d. Prior cooldown time: %s. Warm-up time: %s.",
