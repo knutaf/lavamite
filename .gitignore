@@ -5,3 +5,5 @@
 *.lib
 *.ilk
 /lavamite/lavamite_config_dry.json
+/lavamite/lavamite_status_dry.json
+/lavamite/round_*
