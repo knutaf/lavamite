@@ -86,8 +86,7 @@ template JSONEnv(alias overloads)
         assert(result.type == JSON_TYPE.STRING);
     }
     body{
-        JSONValue dst = void;
-        dst.type = JSON_TYPE.STRING;
+        JSONValue dst;
         dst.str = value;
 
         return dst;
@@ -327,8 +326,7 @@ if(fields.length && fields.length % 2 == 0)
 {
     JSONValue toJSONValueImpl() @property
     {
-        JSONValue jv = void;
-        jv.type = JSON_TYPE.OBJECT;
+        JSONValue jv;
         jv.object = null;
 
         foreach(i; _StaticIota!(0, fields.length))
