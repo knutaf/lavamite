@@ -44,6 +44,19 @@ pure Duration stripFracSeconds(Duration d)
     return d - dur!"nsecs"(d.split!("seconds", "nsecs").nsecs);
 }
 
+pure Duration stripToMinutesOrSeconds(Duration d)
+{
+    auto splitResults = d.split!("minutes", "seconds")();
+    if (splitResults.minutes > 0)
+    {
+        return dur!"minutes"(splitResults.minutes);
+    }
+    else
+    {
+        return dur!"seconds"(splitResults.seconds);
+    }
+}
+
 //
 // YYYYMMDD-HHMM.SS
 //
@@ -59,9 +72,57 @@ string formatTimeToSeconds(SysTime t)
                t.second);
 }
 
+//
+// produces a string suitable for printing, like 2h 10m, 2h, or 10m, depending
+// on how many whole hours and minutes are in the duration
+//
 string formatDurationToHoursMins(Duration d)
 {
-    return format("%d:%02d", d.total!"hours"(), d.split!("hours", "minutes").minutes);
+    assert(d >= Duration.zero);
+
+    auto hmSplit = d.split!("hours", "minutes");
+    string ret = "";
+
+    //
+    // include hours if it's there
+    //
+    if (hmSplit.hours > 0)
+    {
+        ret ~= format("%dh", hmSplit.hours);
+    }
+
+    //
+    // if no hours and no minutes, then say 0 minutes
+    //
+    else if (hmSplit.minutes == 0)
+    {
+        ret = "0m";
+    }
+
+    //
+    // no hours, some minutes
+    //
+    if (hmSplit.minutes > 0)
+    {
+        if (ret.length > 0)
+        {
+            ret ~= " ";
+        }
+
+        ret ~= format("%dm", hmSplit.minutes);
+    }
+
+    return ret;
+}
+
+unittest
+{
+     assert(formatDurationToHoursMins(Duration.zero) == "0m");
+     assert(formatDurationToHoursMins(dur!"minutes"(60)) == "1h");
+     assert(formatDurationToHoursMins(dur!"minutes"(1)) == "1m");
+     assert(formatDurationToHoursMins(dur!"minutes"(61)) == "1h 1m");
+     assert(formatDurationToHoursMins(dur!"seconds"(1)) == "0m");
+     assert(formatDurationToHoursMins(dur!"minutes"(659)) == "10h 59m");
 }
 
 string formatRoundFolder(shared Round r)
@@ -428,25 +489,11 @@ int main(string[] args)
             //
             if (!g_currentRound.wholeRoundInterval.contains(g_clock.currTime))
             {
-                // TODO: a lot of comment updates needed
+                //
                 // choose all the parameters for the new round: cooldown
-                // time, warmup time, and total time till stabilization.
-                // these parameters have been deduced empirically
-                //
-                // cooldown time:
-                // select a fairly long cooldown time. for now we actually
-                // use a constant cooldown time, since varied cooldown times
-                // don't appear to produce more interesting shapes
-                //
-                // warm up time:
-                // choose based on the last round's (albeit static) cooldown
-                // time; the longer the lamp had to cool down, the more time
-                // it will take to warm up. but after a certain amount of
-                // cooldown time, it's effectively the same, so cap it.
-                //
-                // time to stabilization (aka steady state):
-                // take a while to stabilize the lamp till it's bubbling at
-                // steady state.
+                // time, warmup time, warmup behavior, and total time till
+                // stabilization. these parameters have typically been deduced
+                // empirically, and are read from a config file
                 //
                 Duration cooldownTime = g_tuningConfig.rangeCooldownTime.randomDuration!"minutes"();
 
@@ -457,17 +504,31 @@ int main(string[] args)
                 Duration stabilizationTime = g_tuningConfig.stabilizationTime;
 
                 //
-                // in cooler times, 40-50% of 4 hours works. in warmer times,
-                // 30-40% of 4 hours seems to work
+                // Probably the most important parameters relate to how warm-up
+                // time is handled. First we have to decide which warm-up
+                // behavior we want, then the amount of time to use.
                 //
-                // TODO: experimenting with 252-271% of 4 hours, using inactive
-                // warmup time too
+                // ZeroInactive: we keep the lamp active for the entire
+                // duration we choose, and don't turn it off at any time in the
+                // middle.
+                //
+                // EqualInactive: we alternate the lamp turning on and off at
+                // random intervals. The amount of time the lamp spends off
+                // during this phase is the same as on.
+                //
+                // SurplusAfter: we alternate turning the lamp on and off, but
+                // spend more time on than off. The surplus time is spent on
+                // after all the "off" time has been exhausted
+                //
+                // SurplusBefore: we alternate turning the lamp on and off, but
+                // spend more time on than off. The surplus active time is
+                // spent up front, then it alternates as in the case of
+                // EqualInactive for the rest of the time
                 //
                 Duration warmUpActiveTime;
                 Duration warmUpInactiveTime;
 
                 WarmUpTimeHandling warmUpTimeHandling = cast(WarmUpTimeHandling) dice(g_tuningConfig.choicesWarmUpTimeHandling);
-
                 final switch(warmUpTimeHandling)
                 {
                     case WarmUpTimeHandling.ZeroInactive:
@@ -512,14 +573,14 @@ int main(string[] args)
                         stabilizationTime,           // stabilization time
                         cooldownTime));              // cooldown time
 
-                log(format("********* STARTING ROUND: %s", g_currentRound.formatPrettyString()));
+                log(format("********* STARTING ROUND: %s", g_currentRound.formatForLogging()));
             }
             else
             {
                 log(format(
                     "********* CONTINUING ROUND, %s in. %s", 
                     stripFracSeconds(g_clock.currTime - g_currentRound.startTime),
-                    g_currentRound.formatPrettyString()));
+                    g_currentRound.formatForLogging()));
             }
 
             //
@@ -568,6 +629,7 @@ int main(string[] args)
 
                     if (sleepResult.isExitRequested)
                     {
+                        log(format("exiting during surplus active time before. remaining surplus-before time: %s", activeTimeAtBeginningDuration - sleepResult.timeSlept));
                         break;
                     }
                 }
@@ -591,6 +653,10 @@ int main(string[] args)
                     // if there is enough inactive time left to be consumed, do
                     // one period of active time followed by one period of
                     // inactive time
+                    //
+                    // else (if there isn't enough inactive time left), just
+                    // consume all the rest of the active time. That is the
+                    // normal codepath for a ZeroInactive round, too.
                     //
                     if (g_currentRound.remainingWarmUpInactiveTime > g_tuningConfig.rangeActiveCycleTime.min)
                     {
@@ -944,18 +1010,85 @@ void takeAndPostPhoto(shared LavaCam camera)
         }
         catch (Throwable ex)
         {
-            log(format("failure number %d to take photo: %s", i, ex));
+            string msg = format("failure number %d to take photo: %s", i, ex);
+            if (i == numPhotoTries)
+            {
+                throw new Exception(msg);
+            }
+            else
+            {
+                log(msg);
+            }
         }
     }
 
-    // TODO: text needs to be updated
-    tweetTextAndPhoto(
-        format(
-            "Round %d. Prior cooldown time: %s. Warm-up time: %s.",
-            g_currentRound.number,
-            formatDurationToHoursMins(g_currentRound.priorCooldownTime),
-            formatDurationToHoursMins(g_currentRound.warmUpActiveTime)),
-        photoPath);
+    Duration averageCycleTime = stripToMinutesOrSeconds(((g_tuningConfig.rangeActiveCycleTime.max - g_tuningConfig.rangeActiveCycleTime.min) / 2));
+    assert(averageCycleTime < dur!"hours"(1));
+    assert(averageCycleTime > dur!"seconds"(1));
+
+    Duration surplusActiveTime = g_currentRound.warmUpActiveTime - g_currentRound.warmUpInactiveTime;
+
+    string textToTweet;
+    final switch (g_currentRound.warmUpTimeHandling)
+    {
+        case WarmUpTimeHandling.ZeroInactive:
+        {
+            textToTweet = format(
+                "Round %d. Continuous warm-up time: %s.",
+                g_currentRound.number,
+                formatDurationToHoursMins(g_currentRound.warmUpActiveTime));
+        }
+        break;
+
+        case WarmUpTimeHandling.EqualInactive:
+        {
+            //
+            // total "lamp on" time is active time + inactive time
+            //
+            textToTweet = format(
+                "Round %d. Lamp alternating on and off every ~%s for %s.",
+                g_currentRound.number,
+                averageCycleTime,
+                formatDurationToHoursMins(g_currentRound.warmUpActiveTime + g_currentRound.warmUpInactiveTime));
+        }
+        break;
+
+        case WarmUpTimeHandling.SurplusAfter:
+        {
+            assert(surplusActiveTime > Duration.zero);
+
+            //
+            // total "lamp on" time is active time + inactive time. since
+            // active time is broken up into surplus + (same duration as
+            // inactive time), this becomes 2x inactive time + surplus.
+            //
+            textToTweet = format(
+                "Round %d. Lamp alternating on and off every ~%s for %s, then on for %s.",
+                g_currentRound.number,
+                averageCycleTime,
+                formatDurationToHoursMins(g_currentRound.warmUpInactiveTime * 2),
+                formatDurationToHoursMins(surplusActiveTime));
+        }
+        break;
+
+        case WarmUpTimeHandling.SurplusBefore:
+        {
+            assert(surplusActiveTime > Duration.zero);
+
+            //
+            // same commet as above about 2x inactive time + surplus
+            //
+            textToTweet = format(
+                "Round %d. Lamp on for %s, then alternating on and off every ~%s for %s.",
+                g_currentRound.number,
+                formatDurationToHoursMins(surplusActiveTime),
+                averageCycleTime,
+                formatDurationToHoursMins(g_currentRound.warmUpInactiveTime * 2));
+        }
+        break;
+    }
+
+    tweetTextAndPhoto(textToTweet, photoPath);
 }
 
 //
@@ -1272,7 +1405,7 @@ class Round
         return format("r%04d-%05ds", number(), secsIntoRound.total!"seconds"());
     }
 
-    public shared string formatPrettyString()
+    public shared string formatForLogging()
     {
         string output;
         final switch (this.warmUpTimeHandling)
