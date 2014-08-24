@@ -44,6 +44,14 @@ pure Duration stripFracSeconds(Duration d)
     return d - dur!"nsecs"(d.split!("seconds", "nsecs").nsecs);
 }
 
+unittest
+{
+    assert(stripFracSeconds(dur!"msecs"(1001)) == dur!"seconds"(1));
+    assert(stripFracSeconds(dur!"msecs"(1000)) == dur!"seconds"(1));
+    assert(stripFracSeconds(dur!"msecs"(999)) == Duration.zero);
+    assert(stripFracSeconds(dur!"msecs"(61001)) == dur!"seconds"(61));
+}
+
 pure Duration stripToMinutesOrSeconds(Duration d)
 {
     auto splitResults = d.split!("minutes", "seconds")();
@@ -55,6 +63,12 @@ pure Duration stripToMinutesOrSeconds(Duration d)
     {
         return dur!"seconds"(splitResults.seconds);
     }
+}
+
+unittest
+{
+    assert(stripToMinutesOrSeconds(dur!"seconds"(61)) == dur!"minutes"(1));
+    assert(stripToMinutesOrSeconds(dur!"seconds"(59)) == dur!"seconds"(59));
 }
 
 //
@@ -1361,6 +1375,18 @@ class Round
         *from = stripFracSeconds(d1 - d);
 
         return *from;
+    }
+
+    unittest
+    {
+        shared Duration d;
+
+        d = dur!"hours"(2);
+        assert(deductTime(&d, dur!"hours"(1)) == dur!"hours"(1));
+
+        d = dur!"hours"(1);
+        assert(deductTime(&d, dur!"hours"(2)) == Duration.zero);
+        assert(deductTime(&d, Duration.zero) == Duration.zero);
     }
 
     @property public shared pure Interval!SysTime warmUpInterval()
