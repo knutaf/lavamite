@@ -426,7 +426,8 @@ int main(string[] args)
     g_configFile = buildPath(g_rootPath, (g_forReals ? "lavamite_config.json" : "lavamite_config_dry.json"));
     g_statusFile = buildPath(g_rootPath, (g_forReals ? "lavamite_status.json" : "lavamite_status_dry.json"));
 
-    processConfigFiles();
+    processStatusFile();
+    processConfigFile();
 
     //
     // at this point, g_currentRound is set
@@ -493,7 +494,7 @@ int main(string[] args)
             //
             // 1. loaded last round info from a file, so we continue from the
             //    point where the program had last left off. in
-            //    processConfigFiles, we adjust the last round info so that
+            //    processStatusFile, we adjust the last round info so that
             //    its start time is positioned before the current time, so
             //    we can use the current time as an accurate offset into the
             //    round
@@ -798,6 +799,8 @@ int main(string[] args)
         {
             log(format("exception. will continue with next round. %s", ex));
         }
+
+        processConfigFile();
     } while (true);
 
     writeConfigFile();
@@ -809,10 +812,7 @@ int main(string[] args)
 }
 
 //
-// The config file has several settings that we use:
-//
-// twitterInfo: required. contains the authentication information for posting
-// to twitter
+// The status file has two things that we use:
 //
 // lastRoundInfo: optional. contains the information about the last round
 // that we did, so we can pick up where we left off
@@ -821,53 +821,10 @@ int main(string[] args)
 // into the last round the program was running, to let us pick up where we
 // left off
 //
-void processConfigFiles()
+void processStatusFile()
 {
     shared Round rs;
-    TwitterInfo twitterInfo;
-    TuningConfig tuningConfig;
     SysTime lastActionTime = g_clock.currTime;
-
-    if (exists(g_configFile))
-    {
-        JSONValue root;
-
-        try
-        {
-            root = parseJSON(readText(g_configFile));
-        }
-        catch (Throwable ex)
-        {
-            log(format("Malfomed JSON in config file %s. Must contain Twitter info and tuning config.", g_configFile));
-            throw ex;
-        }
-
-        try
-        {
-            JSONValue jsonTwitterInfo = root.object["twitterInfo"];
-            twitterInfo = TwitterInfo.fromJSON(jsonTwitterInfo);
-        }
-        catch (Throwable ex)
-        {
-            log(format("Well-formed JSON file %s that does not contain Twitter info. Must fix.", g_configFile));
-            throw ex;
-        }
-
-        try
-        {
-            JSONValue jsonTuningConfig = root.object["tuningConfig"];
-            tuningConfig = TuningConfig.fromJSON(jsonTuningConfig);
-        }
-        catch (Throwable ex)
-        {
-            log(format("Well-formed JSON file %s that does not contain tuning config. Must fix.", g_configFile));
-            throw ex;
-        }
-    }
-    else
-    {
-        throw new Exception(format("Missing JSON config file %s. Must contain Twitter info and tuning config.", g_configFile));
-    }
 
     if (exists(g_statusFile))
     {
@@ -943,9 +900,6 @@ void processConfigFiles()
         lastActionTime = rs.wholeRoundInterval.end + dur!"seconds"(1);
     }
 
-    g_twitterInfo = twitterInfo;
-    g_tuningConfig = tuningConfig;
-
     //
     // this is really important. shift the round that we loaded from file
     // to be offset from the current time. We calculate how far we made it
@@ -965,6 +919,65 @@ void processConfigFiles()
             rs.remainingWarmUpInactiveTime,
             rs.stabilizationTime,
             rs.cooldownTime));
+}
+
+//
+// The config file has two settings that we use:
+//
+// twitterInfo: required. contains the authentication information for posting
+// to twitter
+//
+// tuningConfig: required. parameters to control the random values used in
+// making new rounds
+//
+void processConfigFile()
+{
+    TwitterInfo twitterInfo;
+    TuningConfig tuningConfig;
+
+    if (exists(g_configFile))
+    {
+        JSONValue root;
+
+        try
+        {
+            root = parseJSON(readText(g_configFile));
+        }
+        catch (Throwable ex)
+        {
+            log(format("Malfomed JSON in config file %s. Must contain Twitter info and tuning config.", g_configFile));
+            throw ex;
+        }
+
+        try
+        {
+            JSONValue jsonTwitterInfo = root.object["twitterInfo"];
+            twitterInfo = TwitterInfo.fromJSON(jsonTwitterInfo);
+        }
+        catch (Throwable ex)
+        {
+            log(format("Well-formed JSON file %s that does not contain Twitter info. Must fix.", g_configFile));
+            throw ex;
+        }
+
+        try
+        {
+            JSONValue jsonTuningConfig = root.object["tuningConfig"];
+            tuningConfig = TuningConfig.fromJSON(jsonTuningConfig);
+        }
+        catch (Throwable ex)
+        {
+            log(format("Well-formed JSON file %s that does not contain tuning config. Must fix.", g_configFile));
+            throw ex;
+        }
+    }
+    else
+    {
+        throw new Exception(format("Missing JSON config file %s. Must contain Twitter info and tuning config.", g_configFile));
+    }
+
+    g_twitterInfo = twitterInfo;
+    g_tuningConfig = tuningConfig;
 }
 
 void writeConfigFile()
