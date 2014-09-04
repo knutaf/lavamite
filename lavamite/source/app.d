@@ -1032,7 +1032,7 @@ void takeAndPostPhoto(shared LavaCam camera)
     {
         try
         {
-            photoPath = camera.takePhotoToPhotosFolder("-POSTED", true);
+            photoPath = camera.takePhotoToPhotosFolder("----POSTED", true);
             break;
         }
         catch (Throwable ex)
@@ -1073,7 +1073,7 @@ void takeAndPostPhoto(shared LavaCam camera)
             // total "lamp on" time is active time + inactive time
             //
             textToTweet = format(
-                "Round %d. Lamp alternating on and off every ~%s for %s.",
+                "Round %d. Alternating on and off every ~%s for %s.",
                 g_currentRound.number,
                 averageCycleTime,
                 formatDurationToHoursMins(g_currentRound.warmUpActiveTime + g_currentRound.warmUpInactiveTime));
@@ -1090,7 +1090,7 @@ void takeAndPostPhoto(shared LavaCam camera)
             // inactive time), this becomes 2x inactive time + surplus.
             //
             textToTweet = format(
-                "Round %d. Lamp alternating on and off every ~%s for %s, then on for %s.",
+                "Round %d. Alternating on and off every ~%s for %s, then on for %s.",
                 g_currentRound.number,
                 averageCycleTime,
                 formatDurationToHoursMins(g_currentRound.warmUpInactiveTime * 2),
@@ -1103,10 +1103,10 @@ void takeAndPostPhoto(shared LavaCam camera)
             assert(surplusActiveTime > Duration.zero);
 
             //
-            // same commet as above about 2x inactive time + surplus
+            // same comment as above about 2x inactive time + surplus
             //
             textToTweet = format(
-                "Round %d. Lamp on for %s, then alternating on and off every ~%s for %s.",
+                "Round %d. On for %s, then alternating on and off every ~%s for %s.",
                 g_currentRound.number,
                 formatDurationToHoursMins(surplusActiveTime),
                 averageCycleTime,
