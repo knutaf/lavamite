@@ -821,7 +821,7 @@ int main(string[] args)
         processConfigFile();
     } while (true);
 
-    writeConfigFile();
+    writeStatusFile();
 
     log("Exiting...");
     powerSwitch.turnOffPower();
@@ -998,7 +998,7 @@ void processConfigFile()
     g_tuningConfig = tuningConfig;
 }
 
-void writeConfigFile()
+void writeStatusFile()
 {
     JSONValue root = JSONValue(
         [
@@ -1023,7 +1023,7 @@ void setCurrentRound(Round r)
     ensureFolder(formatRoundFolder(rs));
 
     g_currentRound = rs;
-    writeConfigFile();
+    writeStatusFile();
 }
 
 void tweetTextAndPhoto(string textToTweet, string photoPath)
