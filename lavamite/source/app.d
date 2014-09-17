@@ -20,7 +20,7 @@ import graphite.twitter;
 
 shared string g_rootPath;
 shared PrivateClock g_clock;
-string g_configFile;
+shared string g_configFile;
 string g_statusFile;
 shared bool g_forReals;
 Tid g_loggingThread;
@@ -157,6 +157,11 @@ void log(string msg)
     send(g_loggingThread, msg);
 }
 
+string getConfigFileName()
+{
+    return (g_forReals ? "lavamite_config.json" : "lavamite_config_dry.json");
+}
+
 void fnLoggingThread()
 {
     string logFolder = null;
@@ -172,13 +177,20 @@ void fnLoggingThread()
             string output;
 
             //
-            // this can be called before the first round has been set. in
+            // this code can run before the first round has been set. in
             // that case, log a format that doesn't include round info. if
             // the current round is set, check if it is a new round, and if
             // so, open a log file in the new folder.
             //
             // only write to log file if the current round is set. write out
             // to stdout always.
+            //
+            // whenever starting a new round, copy in the config file at the
+            // time the round was started, so afterwards you can see how the
+            // chosen parameters of the round were selected. When continuing
+            // a round, make sure not to overwrite the config file, since the
+            // parameters were locked in before, but the config file could have
+            // changed after.
             //
             if (g_currentRound !is null)
             {
@@ -187,6 +199,12 @@ void fnLoggingThread()
                 {
                     logFolder = newLogFolder;
                     logFile = File(buildPath(logFolder, "lavamite.log"), "a");
+
+                    string roundConfigPath = buildPath(logFolder, getConfigFileName());
+                    if (!std.file.exists(roundConfigPath))
+                    {
+                        std.file.copy(g_configFile, roundConfigPath);
+                    }
                 }
 
                 output = format("%s (%s): %s", formatTimeToSeconds(currTime), g_currentRound.getRoundAndSecOffset(currTime), msg);
@@ -423,7 +441,7 @@ int main(string[] args)
 
     shared LavaCam camera = cast(shared LavaCam)(new LavaCam(camDevice, takePhotoPath));
 
-    g_configFile = buildPath(g_rootPath, (g_forReals ? "lavamite_config.json" : "lavamite_config_dry.json"));
+    g_configFile = buildPath(g_rootPath, getConfigFileName());
     g_statusFile = buildPath(g_rootPath, (g_forReals ? "lavamite_status.json" : "lavamite_status_dry.json"));
 
     processStatusFile();
