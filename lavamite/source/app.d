@@ -928,7 +928,7 @@ void processStatusFile()
         new Round(
             rs.number,
             g_clock.currTime - (lastActionTime - rs.startTime),
-            rs.startTime,
+            rs.originalStartTime,
             rs.priorCooldownTime,
             rs.warmUpActiveTime,
             rs.warmUpInactiveTime,
