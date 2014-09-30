@@ -1469,8 +1469,9 @@ class Round
         {
             case WarmUpTimeHandling.ZeroInactive:
                 output = format(
-                    "warm-up active time (zero inactive): %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
+                    "warm-up active time (zero inactive): %s (%ss), stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
                     this.warmUpActiveTime,
+                    this.warmUpActiveTime.total!"seconds"(),
                     this.stabilizationTime,
                     this.cooldownTime,
                     this.priorCooldownTime);
@@ -1478,8 +1479,9 @@ class Round
 
             case WarmUpTimeHandling.EqualInactive:
                 output = format(
-                    "warm-up active time (equal inactive): %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
+                    "warm-up active time (equal inactive): %s (%ss), stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
                     this.warmUpActiveTime,
+                    this.warmUpActiveTime.total!"seconds"(),
                     this.stabilizationTime,
                     this.cooldownTime,
                     this.priorCooldownTime);
@@ -1488,9 +1490,12 @@ class Round
             case WarmUpTimeHandling.SurplusAfter:
             case WarmUpTimeHandling.SurplusBefore:
                 output = format(
-                    "warm-up active time: %s, warm-up inactive time: %s, surplus at %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
+                    "warm-up active time: %s (%ss), warm-up inactive time: %s (%ss, %s%%), surplus at %s, stabilization time: %s, cooldown time: %s, prior cooldown time: %s",
                     this.warmUpActiveTime,
+                    this.warmUpActiveTime.total!"seconds"(),
                     this.warmUpInactiveTime,
+                    this.warmUpInactiveTime.total!"seconds"(),
+                    this.warmUpInactiveTime.total!"seconds"() * 100 / this.warmUpActiveTime.total!"seconds"(),
                     this.warmUpTimeHandling == WarmUpTimeHandling.SurplusAfter ? "end" : "beginning",
                     this.stabilizationTime,
                     this.cooldownTime,
