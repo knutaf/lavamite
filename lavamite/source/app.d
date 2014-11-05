@@ -656,6 +656,7 @@ int main(string[] args)
 
                     log(format("consuming surplus active time at the beginning: %s", activeTimeAtBeginningDuration));
 
+                    writeStatusFile();
                     powerSwitch.turnOnPower();
                     auto sleepResult = sleepHowLongWithExitCheck(activeTimeAtBeginningDuration);
                     g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
@@ -703,6 +704,7 @@ int main(string[] args)
 
                         log(format("active cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleActiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
 
+                        writeStatusFile();
                         auto sleepResult = sleepHowLongWithExitCheck(thisCycleActiveTime);
                         g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
 
@@ -723,6 +725,7 @@ int main(string[] args)
                         powerSwitch.turnOffPower();
                         log(format("inactive cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleInactiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
 
+                        writeStatusFile();
                         sleepResult = sleepHowLongWithExitCheck(thisCycleInactiveTime);
                         g_currentRound.deductRemainingWarmUpInactiveTime(sleepResult.timeSlept);
 
@@ -735,6 +738,7 @@ int main(string[] args)
                     else
                     {
                         log(format("Leaving on to consume all warmup active time: %s", g_currentRound.remainingWarmUpActiveTime));
+                        writeStatusFile();
                         auto sleepResult = sleepHowLongWithExitCheck(g_currentRound.remainingWarmUpActiveTime);
                         g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
 
@@ -786,6 +790,7 @@ int main(string[] args)
                 Duration remainingStabilizationTime = g_currentRound.stabilizationInterval.end - g_clock.currTime + dur!"seconds"(5);
                 log(format("Leaving on for remaining time to stabilization, %s", stripFracSeconds(remainingStabilizationTime)));
 
+                writeStatusFile();
                 if (sleepWithExitCheck(remainingStabilizationTime))
                 {
                     break;
@@ -805,6 +810,7 @@ int main(string[] args)
 
                 Duration remainingCooldownTime = g_currentRound.cooldownInterval.end - g_clock.currTime + dur!"seconds"(5);
                 log(format("Cooling down for %s until next session", stripFracSeconds(remainingCooldownTime)));
+                writeStatusFile();
                 if (sleepWithExitCheck(remainingCooldownTime))
                 {
                     break;
