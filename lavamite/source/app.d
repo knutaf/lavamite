@@ -1038,12 +1038,10 @@ void tweetTextAndPhoto(string textToTweet, string photoPath)
     parms["status"] = textToTweet;
 
     log(format("Tweeting \"%s\" with image %s", textToTweet, photoPath));
-    //Twitter.statuses.update(g_twitterInfo.accessToken, parms);
 
     if (g_forReals)
     {
-        // TODO: re-enable when live
-        //Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, [photoPath], parms);
+        Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, [photoPath], parms);
     }
 }
 
