@@ -447,6 +447,9 @@ int main(string[] args)
     processStatusFile();
     processConfigFile();
 
+    takeAndPostVideoOfRound();
+    Thread.sleep(dur!"seconds"(30));
+
     //
     // at this point, g_currentRound is set
     //
@@ -795,6 +798,8 @@ int main(string[] args)
                 {
                     break;
                 }
+
+                takeAndPostVideoOfRound();
             }
 
             //
@@ -1032,16 +1037,16 @@ void setCurrentRound(Round r)
     writeStatusFile();
 }
 
-void tweetTextAndPhoto(string textToTweet, string photoPath)
+void tweetTextAndMedia(string textToTweet, string mediaPath)
 {
     string[string] parms;
     parms["status"] = textToTweet;
 
-    log(format("Tweeting \"%s\" with image %s", textToTweet, photoPath));
+    log(format("Tweeting \"%s\" with media %s", textToTweet, mediaPath));
 
-    if (g_forReals)
+    //if (g_forReals)
     {
-        Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, [photoPath], parms);
+        Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, [mediaPath], parms);
     }
 }
 
@@ -1137,7 +1142,30 @@ void takeAndPostPhoto(shared LavaCam camera)
         break;
     }
 
-    tweetTextAndPhoto(textToTweet, photoPath);
+    tweetTextAndMedia(textToTweet, photoPath);
+}
+
+void takeAndPostVideoOfRound()
+{
+    if (g_tuningConfig.isVideoEnabled)
+    {
+        string roundFolder = `F:\knut\prog\lavamite\lavamite\round_0270_20141228-1701.00`;
+
+        string command = format(`cmd.exe /c encode_round_as_vid.cmd %s`, roundFolder);
+        log(command);
+        auto result = executeShell(command);
+        if (result.status != 0)
+        {
+            log(result.output);
+            throw new Exception(format("failed encode: %d", result.status), result.output);
+        }
+
+        log("done");
+
+        tweetTextAndMedia(format("t=%s", g_clock.currTime.toISOString()), buildPath(roundFolder, "round.mp4"));
+
+        log("done");
+    }
 }
 
 //
@@ -1719,6 +1747,7 @@ struct TuningConfig
     NumberRange rangeWarmUpInactivePercentOfActiveSurplusBefore;
     DurationRange rangeActiveCycleTime;
     ulong[] choicesWarmUpTimeHandling;
+    bool isVideoEnabled;
 
     public static TuningConfig fromJSON(JSONValue root)
     {
@@ -1741,6 +1770,8 @@ struct TuningConfig
         ti.rangeActiveCycleTime = DurationRange.fromJSON!"seconds"(root.object["rangeActiveCycleTimeSeconds"]);
 
         ti.choicesWarmUpTimeHandling = ulongArrayFromJSON(root.object["choicesWarmUpTimeHandling"], WarmUpTimeHandling.max+1);
+
+        ti.isVideoEnabled = root.object["isVideoEnabled"].type == JSON_TYPE.TRUE;
 
         return ti;
     }

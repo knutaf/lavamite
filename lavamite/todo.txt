@@ -2,10 +2,14 @@
 - understand shared better, and make sure we're using it right
 
     knutaf2
-    token.consumer.key = "pAeROf1TLat6zyVk82Ww";
-    token.consumer.secret = "gPnk6LutpFds0aLuoTJBHy9GAIaGYn09o8Ogu9REaE";
-    token.key = "576620271-IK5nrKUZEY5Wy25JlTVQtJ11jHrGqPYNC0ur7uY7";
-    token.secret = "FXKgFEoKTXujKaUtvfsIoSIVE3bBmMdiKq5YI6AnZImAG";
+    "twitterInfo": {
+        "auth": {
+            "apiKey": "pAeROf1TLat6zyVk82Ww",
+            "accountKey": "576620271-IK5nrKUZEY5Wy25JlTVQtJ11jHrGqPYNC0ur7uY7",
+            "accountSecret": "FXKgFEoKTXujKaUtvfsIoSIVE3bBmMdiKq5YI6AnZImAG",
+            "apiSecret": "gPnk6LutpFds0aLuoTJBHy9GAIaGYn09o8Ogu9REaE"
+        }
+    },
 
     /*
     lavamite
