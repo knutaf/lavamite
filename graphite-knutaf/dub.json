@@ -1,0 +1,9 @@
+{
+    "name": "graphite-knutaf",
+    "targetName": "graphite-knutaf",
+    "description": "A fork of the graphite library with stuff trimmed out and bug fixes.",
+    "copyright": "Copyright © 2015, knutaf",
+    "authors": ["knutaf"],
+    "dependencies": {
+    }
+}

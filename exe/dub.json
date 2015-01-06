@@ -1,0 +1,10 @@
+{
+    "name": "exe",
+    "targetName": "lavamite",
+    "description": "An application to upload pictures of contorted lava lamps.",
+    "copyright": "Copyright © 2014, Junkface",
+    "authors": ["Junkface"],
+    "dependencies": {
+        "lavamite:graphite-knutaf": ">=1.0.0"
+    },
+}

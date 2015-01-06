@@ -1,9 +1,10 @@
 .dub
+dub.selections.json
 *.exe
 *.pdb
 *.obj
 *.lib
 *.ilk
-/lavamite/lavamite_config_dry.json
-/lavamite/lavamite_status_dry.json
-/lavamite/round_*
+/exe/lavamite_config_dry.json
+/exe/lavamite_status_dry.json
+/exe/round_*
