@@ -11,14 +11,17 @@ cmd /c mkdir %tmpdir%
 
 set num=0
 for %%f in (%indir%\*.jpg) do call :renam %%f
+
 REM ffmpeg -framerate 13 -i %tmpdir%\%%d.jpg -c:v libx264 -preset veryslow -b:v 200000 %indir%\round.mp4
-ffmpeg -y -s 320x240 -framerate 20 -i %tmpdir%\%%d.jpg -b:v 200000 %indir%\round.gif
+REM ffmpeg -y -s 160x120 -framerate 12 -i %tmpdir%\%%d.jpg -b:v 100000 %indir%\round.gif
+f:\programs\gifsicle.exe -m -V -o %indir%\round.gif --delay 1 --optimize=3 --no-extensions --resize 213x160 %tmpdir%\*.gif
 goto :EOF
 
 :renam
 set fil=%1
 if not defined fil goto :EOF
-copy %fil% %tmpdir%\%num%.jpg
+REM copy %fil% %tmpdir%\%num%.jpg
+ffmpeg -y -i %fil% %tmpdir%\%~n1.gif
 set /a num=%num%+1
 goto :EOF
 
