@@ -152,9 +152,9 @@ void ensureFolder(string folderPath)
     }
 }
 
-void log(string msg)
+void log(Args...)(string fmt, Args args)
 {
-    send(g_loggingThread, msg);
+    send(g_loggingThread, format(fmt, args));
 }
 
 string getConfigFileName()
@@ -263,11 +263,11 @@ void fnPhotoThread(Tid loggingThread, shared LavaCam camera)
                     // in particular, log the output of the failed takephoto
                     // command
                     //
-                    log(format("failed to take photo: %s\n%s", ex, ex.output));
+                    log("failed to take photo: %s\n%s", ex, ex.output);
                 }
                 catch (Throwable ex)
                 {
-                    log(format("exception in photo thread: %s", ex));
+                    log("exception in photo thread: %s", ex);
                 }
 
                 //
@@ -454,7 +454,7 @@ int main(string[] args)
     DWORD baudRate = CBR_9600;
     ControllablePowerSwitch powerSwitch = new ControllablePowerSwitch(comPort, baudRate);
 
-    log(format("Attached to power switch on %s at %d baud", comPort, baudRate));
+    log("Attached to power switch on %s at %d baud", comPort, baudRate);
 
     //
     // separate thread to wait for "quit", which sends a message back to the
@@ -606,14 +606,13 @@ int main(string[] args)
                         stabilizationTime,           // stabilization time
                         cooldownTime));              // cooldown time
 
-                log(format("********* STARTING ROUND: %s", g_currentRound.formatForLogging()));
+                log("********* STARTING ROUND: %s", g_currentRound.formatForLogging());
             }
             else
             {
-                log(format(
-                    "********* CONTINUING ROUND, %s in. %s", 
+                log("********* CONTINUING ROUND, %s in. %s", 
                     stripFracSeconds(g_clock.currTime - g_currentRound.startTime),
-                    g_currentRound.formatForLogging()));
+                    g_currentRound.formatForLogging());
             }
 
             //
@@ -654,7 +653,7 @@ int main(string[] args)
                     //
                     Duration activeTimeAtBeginningDuration = g_currentRound.remainingWarmUpActiveTime - g_currentRound.warmUpInactiveTime;
 
-                    log(format("consuming surplus active time at the beginning: %s", activeTimeAtBeginningDuration));
+                    log("consuming surplus active time at the beginning: %s", activeTimeAtBeginningDuration);
 
                     writeStatusFile();
                     powerSwitch.turnOnPower();
@@ -663,7 +662,7 @@ int main(string[] args)
 
                     if (sleepResult.isExitRequested)
                     {
-                        log(format("exiting during surplus active time before. remaining surplus-before time: %s", activeTimeAtBeginningDuration - sleepResult.timeSlept));
+                        log("exiting during surplus active time before. remaining surplus-before time: %s", activeTimeAtBeginningDuration - sleepResult.timeSlept);
                         break;
                     }
                 }
@@ -702,7 +701,7 @@ int main(string[] args)
                                 g_tuningConfig.rangeActiveCycleTime.randomDuration!"seconds"(),
                                 g_currentRound.remainingWarmUpActiveTime);
 
-                        log(format("active cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleActiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
+                        log("active cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleActiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime);
 
                         writeStatusFile();
                         auto sleepResult = sleepHowLongWithExitCheck(thisCycleActiveTime);
@@ -723,7 +722,7 @@ int main(string[] args)
                                 g_currentRound.remainingWarmUpInactiveTime);
 
                         powerSwitch.turnOffPower();
-                        log(format("inactive cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleInactiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
+                        log("inactive cycle time = %s. remaining active: %s, remaining inactive: %s", thisCycleInactiveTime, g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime);
 
                         writeStatusFile();
                         sleepResult = sleepHowLongWithExitCheck(thisCycleInactiveTime);
@@ -737,7 +736,7 @@ int main(string[] args)
                     }
                     else
                     {
-                        log(format("Leaving on to consume all warmup active time: %s", g_currentRound.remainingWarmUpActiveTime));
+                        log("Leaving on to consume all warmup active time: %s", g_currentRound.remainingWarmUpActiveTime);
                         writeStatusFile();
                         auto sleepResult = sleepHowLongWithExitCheck(g_currentRound.remainingWarmUpActiveTime);
                         g_currentRound.deductRemainingWarmUpActiveTime(sleepResult.timeSlept);
@@ -752,7 +751,7 @@ int main(string[] args)
 
                 if (isExitRequested)
                 {
-                    log(format("Exiting during warmup. Remaining active time: %s, inactive time: %s", g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime));
+                    log("Exiting during warmup. Remaining active time: %s, inactive time: %s", g_currentRound.remainingWarmUpActiveTime, g_currentRound.remainingWarmUpInactiveTime);
                     break;
                 }
 
@@ -788,7 +787,7 @@ int main(string[] args)
                 // us into the next phase, once this phase is completed
                 //
                 Duration remainingStabilizationTime = g_currentRound.stabilizationInterval.end - g_clock.currTime + dur!"seconds"(5);
-                log(format("Leaving on for remaining time to stabilization, %s", stripFracSeconds(remainingStabilizationTime)));
+                log("Leaving on for remaining time to stabilization, %s", stripFracSeconds(remainingStabilizationTime));
 
                 writeStatusFile();
                 if (sleepWithExitCheck(remainingStabilizationTime))
@@ -809,7 +808,7 @@ int main(string[] args)
                 inSomePhase = true;
 
                 Duration remainingCooldownTime = g_currentRound.cooldownInterval.end - g_clock.currTime + dur!"seconds"(5);
-                log(format("Cooling down for %s until next session", stripFracSeconds(remainingCooldownTime)));
+                log("Cooling down for %s until next session", stripFracSeconds(remainingCooldownTime));
                 writeStatusFile();
                 if (sleepWithExitCheck(remainingCooldownTime))
                 {
@@ -821,7 +820,7 @@ int main(string[] args)
         }
         catch (Throwable ex)
         {
-            log(format("exception. will continue with next round. %s", ex));
+            log("exception. will continue with next round. %s", ex);
         }
 
         processConfigFile();
@@ -860,7 +859,7 @@ void processStatusFile()
         }
         catch (Throwable ex)
         {
-            log(format("Malfomed JSON in status file %s.", g_statusFile));
+            log("Malfomed JSON in status file %s.", g_statusFile);
             throw ex;
         }
 
@@ -878,7 +877,7 @@ void processStatusFile()
         }
         catch (Throwable ex)
         {
-            log(format("Well-formed JSON file %s with malformed lastActionTime (should be ISO string). Must fix.", g_statusFile));
+            log("Well-formed JSON file %s with malformed lastActionTime (should be ISO string). Must fix.", g_statusFile);
             throw ex;
         }
 
@@ -896,13 +895,13 @@ void processStatusFile()
         }
         catch (Throwable ex)
         {
-            log(format("Well-formed JSON file %s with incorrect last round info.", g_statusFile));
+            log("Well-formed JSON file %s with incorrect last round info.", g_statusFile);
             throw ex;
         }
     }
     else
     {
-        log(format("missing status file %s. starting from scratch.", g_statusFile));
+        log("missing status file %s. starting from scratch.", g_statusFile);
 
         rs = cast(shared Round) new Round(
                 0,                    // round number
@@ -969,7 +968,7 @@ void processConfigFile()
         }
         catch (Throwable ex)
         {
-            log(format("Malfomed JSON in config file %s. Must contain Twitter info and tuning config.", g_configFile));
+            log("Malfomed JSON in config file %s. Must contain Twitter info and tuning config.", g_configFile);
             throw ex;
         }
 
@@ -980,7 +979,7 @@ void processConfigFile()
         }
         catch (Throwable ex)
         {
-            log(format("Well-formed JSON file %s that does not contain Twitter info. Must fix.", g_configFile));
+            log("Well-formed JSON file %s that does not contain Twitter info. Must fix.", g_configFile);
             throw ex;
         }
 
@@ -991,7 +990,7 @@ void processConfigFile()
         }
         catch (Throwable ex)
         {
-            log(format("Well-formed JSON file %s that does not contain tuning config. Must fix.", g_configFile));
+            log("Well-formed JSON file %s that does not contain tuning config. Must fix.", g_configFile);
             throw ex;
         }
     }
@@ -1037,7 +1036,7 @@ void tweetTextAndPhoto(string textToTweet, string photoPath)
     string[string] parms;
     parms["status"] = textToTweet;
 
-    log(format("Tweeting \"%s\" with image %s", textToTweet, photoPath));
+    log("Tweeting \"%s\" with image %s", textToTweet, photoPath);
 
     if (g_forReals)
     {
@@ -1188,7 +1187,7 @@ class ControllablePowerSwitch
             m_hCOMPort = INVALID_HANDLE_VALUE;
         }
 
-        log(format("Waiting for %s for microcontroller to initialize", initTime));
+        log("Waiting for %s for microcontroller to initialize", initTime);
         privateSleep(initTime);
     }
 
@@ -1209,7 +1208,7 @@ class ControllablePowerSwitch
             throw new Exception(format("failed GetCommState: %d", GetLastError()));
         }
 
-        //log(format("Previous baud: %d, byteSize: %d, parity: %d, stopbits: %d", dcb.m_BaudRate, dcb.ByteSize, dcb.Parity, dcb.StopBits));
+        //log("Previous baud: %d, byteSize: %d, parity: %d, stopbits: %d", dcb.m_BaudRate, dcb.ByteSize, dcb.Parity, dcb.StopBits);
 
         dcb.BaudRate = m_baudRate;    // set the baud rate
         dcb.ByteSize = 8;             // data size, xmit, and rcv
@@ -1773,7 +1772,7 @@ class LavaCam
     {
         if (showLog)
         {
-            log(format("Taking photo and saving to %s", outputPath));
+            log("Taking photo and saving to %s", outputPath);
         }
 
         string takePhotoCommand = format(
