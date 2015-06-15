@@ -6,6 +6,7 @@ module graphite.utils.json;
 
 import std.algorithm;
 import std.array;
+import std.complex;
 import std.conv;
 import std.exception;
 import std.json;
@@ -54,14 +55,22 @@ template JSONEnv(alias overloads)
 
 
     ///
-    JSONValue toJSONValue(T)(T t)
+    JSONValue toJSONValue(T)(auto ref T t)
     {
         static if(is(typeof(overloads.toJSONValueImpl(t)) == JSONValue))
-            return overloads.toJSONValueImpl(t);
+            return overloads.toJSONValueImpl(forward!t);
         else static if(is(typeof(t.toJSONValueImpl()) == JSONValue))
             return t.toJSONValueImpl();
         else
-            return toJSONValueImpl(t);
+            return toJSONValueImpl(forward!t);
+    }
+
+
+    ///
+    JSONValue toJSONValueImpl(T)(T value)
+    if(is(T == JSONValue))
+    {
+        return value;
     }
 
 
@@ -72,24 +81,18 @@ template JSONEnv(alias overloads)
         assert(result.type == JSON_TYPE.NULL);
     }
     body{
-        JSONValue dst = void;
-        dst.type = JSON_TYPE.NULL;
-
-        return dst;
+        return JSONValue(null);
     }
 
 
     ///
     JSONValue toJSONValueImpl(T)(T value)
-    if(is(T == string))
+    if(isSomeString!T)
     out(result){
         assert(result.type == JSON_TYPE.STRING);
     }
     body{
-        JSONValue dst;
-        dst.str = value;
-
-        return dst;
+        return JSONValue(value.to!string);
     }
 
 
@@ -100,11 +103,7 @@ template JSONEnv(alias overloads)
         assert(result.type == JSON_TYPE.UINTEGER);
     }
     body{
-        JSONValue dst = void;
-        dst.type = JSON_TYPE.UINTEGER;
-        dst.uinteger = value;
-
-        return dst;
+        return JSONValue(value);
     }
 
 
@@ -115,11 +114,7 @@ template JSONEnv(alias overloads)
         assert(result.type == JSON_TYPE.INTEGER);
     }
     body{
-        JSONValue dst = void;
-        dst.type = JSON_TYPE.INTEGER;
-        dst.integer = value;
-
-        return dst;
+        return JSONValue(value);
     }
 
 
@@ -130,10 +125,7 @@ template JSONEnv(alias overloads)
         assert(result.type == JSON_TYPE.TRUE || result.type == JSON_TYPE.FALSE);
     }
     body{
-        JSONValue dst = void;
-        dst.type = value ? JSON_TYPE.TRUE : JSON_TYPE.FALSE;
-
-        return dst;
+        return JSONValue(value);
     }
 
 
@@ -144,11 +136,7 @@ template JSONEnv(alias overloads)
         assert(result.type == JSON_TYPE.FLOAT);
     }
     body{
-        JSONValue dst = void;
-        dst.type = JSON_TYPE.FLOAT;
-        dst.floating = value;
-
-        return dst;
+        return JSONValue(value);
     }
 
 
@@ -159,13 +147,11 @@ template JSONEnv(alias overloads)
         assert(result.type == JSON_TYPE.ARRAY);
     }
     body{
-        JSONValue dst = void;
-        dst.type = JSON_TYPE.ARRAY;
-        dst.array = null;
-        foreach(e; range)
-            dst.array ~= toJSONValue(e);
+        auto app = appender!(JSONValue[])();
 
-        return dst;
+        app.put(range.map!(a => toJSONValue(a)));
+
+        return JSONValue(app.data);
     }
 
 
@@ -176,25 +162,63 @@ template JSONEnv(alias overloads)
         assert(result.type == JSON_TYPE.OBJECT);
     }
     body{
-        JSONValue dst = void;
-        dst.type = JSON_TYPE.OBJECT;
-        dst.object = null;
-
+        JSONValue[string] dst;
         foreach(k, v; aa){
             static if(is(typeof(k) : string))
-                dst.object[k] = toJSONValue(v);
+                dst[k] = toJSONValue(v);
             else
-                dst.object[k.to!string()] = toJSONValue(v);
+                dst[k.to!string()] = toJSONValue(v);
         }
 
-        return dst;
+        return JSONValue(dst);
     }
 
+
+    /// 
+    JSONValue toJSONValueImpl(T)(T v)
+    if(is(T == Variant))
+    {
+        if(!v.hasValue)
+            return JSONValue(null);
+        else
+        {
+            bool bSuccess;
+            JSONValue jv;
+
+            alias TT = TypeTuple!(Variant, Variant[], Variant[string], Variant[Variant],
+                                  byte, ubyte, short, ushort,
+                                  int, uint, long, ulong,
+                                  float, double, real,
+                                  string, wstring, dstring,
+                                  bool, typeof(null));
+
+            foreach(U; TT){
+                if(auto p = v.peek!U){
+                    jv = toJSONValue(*p);
+                    bSuccess =  true;
+                    break;
+                }
+            }
+
+            if(!bSuccess)
+                jv = JSONValue(v.to!string());
+
+            return jv;
+        }
+    }
 
 
     private string createFromJSONValueExceptionMsg(T)(JSONValue json)
     {
         return "cannot convert to '" ~ T.stringof ~ "' from "`"` ~ toJSON(&json) ~ `"`;
+    }
+
+
+    ///
+    void fromJSONValueImpl(T)(JSONValue json, ref T dst)
+    if(is(T == JSONValue))
+    {
+        dst = json;
     }
 
 
@@ -208,10 +232,10 @@ template JSONEnv(alias overloads)
 
     ///
     void fromJSONValueImpl(T)(JSONValue json, ref T dst)
-    if(is(T == string))
+    if(isSomeString!T)
     {
         enforceEx!JSONException(json.type == JSON_TYPE.STRING, createFromJSONValueExceptionMsg!T(json));
-        dst = json.str;
+        dst = json.str.to!T;
     }
 
 
@@ -315,6 +339,55 @@ template JSONEnv(alias overloads)
             dst[k.to!K] = elem;
         }
     }
+
+
+    ///
+    void fromJSONValueImpl(T)(JSONValue json, ref T dst)
+    if(is(T == Variant))
+    {
+        static void impl(T)(JSONValue json, ref Variant dst)
+        {
+            T v;
+            fromJSONValue(json, v);
+            dst = v;
+        }
+
+
+        final switch(json.type)
+        {
+          case JSON_TYPE.STRING:
+            impl!string(json, dst);
+            return;
+
+          case JSON_TYPE.INTEGER:
+            impl!long(json, dst);
+            return;
+
+          case JSON_TYPE.UINTEGER:
+            impl!ulong(json, dst);
+            return;
+
+          case JSON_TYPE.FLOAT:
+            impl!real(json, dst);
+            return;
+
+          case JSON_TYPE.OBJECT:
+            impl!(Variant[string])(json, dst);
+            return;
+
+          case JSON_TYPE.ARRAY:
+            impl!(Variant[])(json, dst);
+            return;
+
+          case JSON_TYPE.TRUE, JSON_TYPE.FALSE:
+            impl!(bool)(json, dst);
+            return;
+
+          case JSON_TYPE.NULL:
+            impl!(typeof(null))(json, dst);
+            return;
+        }
+    }
 }
 
 
@@ -326,8 +399,7 @@ if(fields.length && fields.length % 2 == 0)
 {
     JSONValue toJSONValueImpl() @property
     {
-        JSONValue jv;
-        jv.object = null;
+        JSONValue[string] aa;
 
         foreach(i; _StaticIota!(0, fields.length))
         {
@@ -336,13 +408,13 @@ if(fields.length && fields.length % 2 == 0)
                 static assert(is(typeof(fields[i]) == string));
 
                 static if(is(typeof(mixin(fields[i+1]))))
-                    jv.object[fields[i]] = toJSONValue(mixin(fields[i+1]));
+                    aa[fields[i]] = toJSONValue(mixin(fields[i+1]));
                 else
-                    jv.object[fields[i]] = toJSONValue(fields[i+1]);
+                    aa[fields[i]] = toJSONValue(fields[i+1]);
             }
         }
 
-        return jv;
+        return JSONValue(aa);
     }
 
 

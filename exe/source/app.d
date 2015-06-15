@@ -1040,7 +1040,7 @@ void tweetTextAndPhoto(string textToTweet, string photoPath)
 
     if (g_forReals)
     {
-        Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, [photoPath], parms);
+        Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, photoPath, parms);
     }
 }
 

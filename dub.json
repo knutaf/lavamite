@@ -11,5 +11,6 @@
     "subPackages": [
         "./exe/",
         "./graphite-knutaf/",
+        "./tweetit/",
     ],
 }
