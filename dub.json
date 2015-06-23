@@ -6,11 +6,10 @@
     "authors": ["Junkface"],
     "dependencies": {
         "lavamite:exe": ">=1.0.0",
-        "lavamite:graphite-knutaf": ">=1.0.0",
+        "graphite-knutaf": ">=1.0.0",
     },
     "subPackages": [
         "./exe/",
-        "./graphite-knutaf/",
         "./tweetit/",
     ],
 }
