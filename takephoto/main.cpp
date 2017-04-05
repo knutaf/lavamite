@@ -1,10 +1,13 @@
 #include <windows.h>
+#include <wrl.h>
+#include <stdio.h>
 #include <objbase.h>
-#include <atlbase.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfcaptureengine.h>
 #include <wincodec.h>
+
+namespace Mwrl = Microsoft::WRL;
 
 template <class T> void SafeRelease(T **ppT)
 {
@@ -130,21 +133,21 @@ HRESULT StartPreview(IMFCaptureEngine* pEngine)
     hr = pEngine->GetSink(MF_CAPTURE_ENGINE_SINK_TYPE_PREVIEW, &pSink);
     if (FAILED(hr))
     {
-        wprintf(L"failed GetSink: %08LX\n", hr);
+        wprintf(L"failed GetSink: %08X\n", hr);
         goto error;
     }
 
     hr = pSink->QueryInterface(IID_PPV_ARGS(&pPreview));
     if (FAILED(hr))
     {
-        wprintf(L"failed QI preview sink: %08LX\n", hr);
+        wprintf(L"failed QI preview sink: %08X\n", hr);
         goto done;
     }
 
     hr = pEngine->GetSource(&pSource);
     if (FAILED(hr))
     {
-        wprintf(L"failed GetSource: %08LX\n", hr);
+        wprintf(L"failed GetSource: %08X\n", hr);
         goto done;
     }
 
@@ -152,21 +155,21 @@ HRESULT StartPreview(IMFCaptureEngine* pEngine)
     hr = pSource->GetCurrentDeviceMediaType((DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW , &pMediaType);
     if (FAILED(hr))
     {
-        wprintf(L"failed GetCurrentDeviceMediaType: %08LX\n", hr);
+        wprintf(L"failed GetCurrentDeviceMediaType: %08X\n", hr);
         goto done;
     }
 
     hr = CloneVideoMediaType(pMediaType, MFVideoFormat_RGB32, &pMediaType2);
     if (FAILED(hr))
     {
-        wprintf(L"failed CloneVideoMediaType: %08LX\n", hr);
+        wprintf(L"failed CloneVideoMediaType: %08X\n", hr);
         goto done;
     }
 
     hr = pMediaType2->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
     if (FAILED(hr))
     {
-        wprintf(L"failed SetUINT32 all samples independent: %08LX\n", hr);
+        wprintf(L"failed SetUINT32 all samples independent: %08X\n", hr);
         goto done;
     }
 
@@ -175,7 +178,7 @@ HRESULT StartPreview(IMFCaptureEngine* pEngine)
     hr = pPreview->AddStream((DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW,  pMediaType2, NULL, &dwSinkStreamIndex);
     if (FAILED(hr))
     {
-        wprintf(L"failed AddStream video preview: %08LX\n", hr);
+        wprintf(L"failed AddStream video preview: %08X\n", hr);
         goto done;
     }
 
@@ -183,7 +186,7 @@ HRESULT StartPreview(IMFCaptureEngine* pEngine)
     hr = pPreview->SetSampleCallback(dwSinkStreamIndex, pCallback);
     if (FAILED(hr))
     {
-        wprintf(L"failed SetSampleCallback: %08LX\n", hr);
+        wprintf(L"failed SetSampleCallback: %08X\n", hr);
         goto done;
     }
 
@@ -207,44 +210,44 @@ HRESULT CreatePhotoMediaType(IMFMediaType *pSrcMediaType, UINT32 pxWidth, UINT32
 {
     *ppPhotoMediaType = NULL;
 
-    CComPtr<IMFMediaType> pPhotoMediaType;
+    Mwrl::ComPtr<IMFMediaType> pPhotoMediaType;
 
     HRESULT hr = MFCreateMediaType(&pPhotoMediaType);
     if (FAILED(hr))
     {
-        wprintf(L"failed MFCreateMediaType: %08LX\n", hr);
+        wprintf(L"failed MFCreateMediaType: %08X\n", hr);
         goto done;
     }
 
     hr = pPhotoMediaType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Image);
     if (FAILED(hr))
     {
-        wprintf(L"failed SetGUID major type: %08LX\n", hr);
+        wprintf(L"failed SetGUID major type: %08X\n", hr);
         goto done;
     }
 
     hr = pPhotoMediaType->SetGUID(MF_MT_SUBTYPE, GUID_ContainerFormatJpeg);
     if (FAILED(hr))
     {
-        wprintf(L"failed SetGUID sub type: %08LX\n", hr);
+        wprintf(L"failed SetGUID sub type: %08X\n", hr);
         goto done;
     }
 
     if (pxWidth == 0 || pxHeight == 0)
     {
-        hr = CopyAttribute(pSrcMediaType, pPhotoMediaType, MF_MT_FRAME_SIZE);
+        hr = CopyAttribute(pSrcMediaType, pPhotoMediaType.Get(), MF_MT_FRAME_SIZE);
         if (FAILED(hr))
         {
-            wprintf(L"failed copy size attr: %08LX\n", hr);
+            wprintf(L"failed copy size attr: %08X\n", hr);
             goto done;
         }
     }
     else
     {
-        hr = MFSetAttributeSize(pPhotoMediaType, MF_MT_FRAME_SIZE, pxWidth, pxHeight);
+        hr = MFSetAttributeSize(pPhotoMediaType.Get(), MF_MT_FRAME_SIZE, pxWidth, pxHeight);
         if (FAILED(hr))
         {
-            wprintf(L"failed setting frame size: %08LX\n", hr);
+            wprintf(L"failed setting frame size: %08X\n", hr);
             goto done;
         }
     }
@@ -257,54 +260,54 @@ done:
 
 HRESULT TakePhoto(IMFCaptureEngine* pEngine, PCWSTR pszFileName, UINT32 pxWidth, UINT32 pxHeight)
 {
-    CComPtr<IMFCaptureSink> pSink;
-    CComPtr<IMFCapturePhotoSink> pPhoto;
-    CComPtr<IMFCaptureSource> pSource;
-    CComPtr<IMFMediaType> pMediaType;
-    CComPtr<IMFMediaType> pMediaType2;
+    Mwrl::ComPtr<IMFCaptureSink> pSink;
+    Mwrl::ComPtr<IMFCapturePhotoSink> pPhoto;
+    Mwrl::ComPtr<IMFCaptureSource> pSource;
+    Mwrl::ComPtr<IMFMediaType> pMediaType;
+    Mwrl::ComPtr<IMFMediaType> pMediaType2;
     bool bHasPhotoStream = true;
 
     // Get a pointer to the photo sink.
     HRESULT hr = pEngine->GetSink(MF_CAPTURE_ENGINE_SINK_TYPE_PHOTO, &pSink);
     if (FAILED(hr))
     {
-        wprintf(L"failed get sink: %08LX\n", hr);
+        wprintf(L"failed get sink: %08X\n", hr);
         goto done;
     }
 
     hr = pSink->QueryInterface(IID_PPV_ARGS(&pPhoto));
     if (FAILED(hr))
     {
-        wprintf(L"failed qi photo sink: %08LX\n", hr);
+        wprintf(L"failed qi photo sink: %08X\n", hr);
         goto done;
     }
 
     hr = pEngine->GetSource(&pSource);
     if (FAILED(hr))
     {
-        wprintf(L"failed get source: %08LX\n", hr);
+        wprintf(L"failed get source: %08X\n", hr);
         goto done;
     }
 
-    hr = pSource->GetCurrentDeviceMediaType((DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_PHOTO , &pMediaType);     
+    hr = pSource->GetCurrentDeviceMediaType((DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_PHOTO , &pMediaType);
     if (FAILED(hr))
     {
-        wprintf(L"failed get media type: %08LX\n", hr);
+        wprintf(L"failed get media type: %08X\n", hr);
         goto done;
     }
 
     //Configure the photo format
-    hr = CreatePhotoMediaType(pMediaType, pxWidth, pxHeight, &pMediaType2);
+    hr = CreatePhotoMediaType(pMediaType.Get(), pxWidth, pxHeight, &pMediaType2);
     if (FAILED(hr))
     {
-        wprintf(L"failed create media type: %08LX\n", hr);
+        wprintf(L"failed create media type: %08X\n", hr);
         goto done;
     }
 
     hr = pPhoto->RemoveAllStreams();
     if (FAILED(hr))
     {
-        wprintf(L"failed remove streams: %08LX\n", hr);
+        wprintf(L"failed remove streams: %08X\n", hr);
         goto done;
     }
 
@@ -312,26 +315,26 @@ HRESULT TakePhoto(IMFCaptureEngine* pEngine, PCWSTR pszFileName, UINT32 pxWidth,
     // Try to connect the first still image stream to the photo sink
     if(bHasPhotoStream)
     {
-        hr = pPhoto->AddStream((DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_PHOTO,  pMediaType2, NULL, &dwSinkStreamIndex);        
+        hr = pPhoto->AddStream((DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_PHOTO, pMediaType2.Get(), NULL, &dwSinkStreamIndex);
     }
 
     if(FAILED(hr))
     {
-        wprintf(L"failed add stream: %08LX\n", hr);
+        wprintf(L"failed add stream: %08X\n", hr);
         goto done;
     }
 
     hr = pPhoto->SetOutputFileName(pszFileName);
     if (FAILED(hr))
     {
-        wprintf(L"failed set output filename: %08LX\n", hr);
+        wprintf(L"failed set output filename: %08X\n", hr);
         goto done;
     }
 
     hr = pEngine->TakePhoto();
     if (FAILED(hr))
     {
-        wprintf(L"failed take photo: %08LX\n", hr);
+        wprintf(L"failed take photo: %08X\n", hr);
         goto done;
     }
 
@@ -464,32 +467,32 @@ wmain(
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
 
     {
-        CComPtr<IMFMediaSource> spSource;
-        CComPtr<IMFAttributes> spAttributes;
-        CComPtr<IMFCaptureEngineClassFactory> spEngineFactory;
-        CComPtr<IMFCaptureEngine> spEngine;
-        CComPtr<IMFCaptureEngineOnEventCallback> spCallback;
+        Mwrl::ComPtr<IMFMediaSource> spSource;
+        Mwrl::ComPtr<IMFAttributes> spAttributes;
+        Mwrl::ComPtr<IMFCaptureEngineClassFactory> spEngineFactory;
+        Mwrl::ComPtr<IMFCaptureEngine> spEngine;
+        Mwrl::ComPtr<IMFCaptureEngineOnEventCallback> spCallback;
 
         if (fEnumDevices || fChooseDevice)
         {
             hr = MFCreateAttributes(&spAttributes, 1);
             if (FAILED(hr))
             {
-                wprintf(L"failed MFCreateAttributes: %08LX\n", hr);
+                wprintf(L"failed MFCreateAttributes: %08X\n", hr);
                 goto error;
             }
 
             hr = spAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
             if (FAILED(hr))
             {
-                wprintf(L"failed SetGUID: %08LX\n", hr);
+                wprintf(L"failed SetGUID: %08X\n", hr);
                 goto error;
             }
 
-            hr = MFEnumDeviceSources(spAttributes, &rgpDevices, &cDevices);
+            hr = MFEnumDeviceSources(spAttributes.Get(), &rgpDevices, &cDevices);
             if (FAILED(hr))
             {
-                wprintf(L"failed MFEnumDeviceSources: %08LX\n", hr);
+                wprintf(L"failed MFEnumDeviceSources: %08X\n", hr);
                 goto error;
             }
 
@@ -502,7 +505,7 @@ wmain(
                     hr = rgpDevices[i]->GetString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, wszFriendlyName, ARRAYSIZE(wszFriendlyName), &cchStored);
                     if (FAILED(hr))
                     {
-                        wprintf(L"failed GetString: %08LX\n", hr);
+                        wprintf(L"failed GetString: %08X\n", hr);
                         goto error;
                     }
                     else
@@ -528,37 +531,41 @@ wmain(
             hr = rgpDevices[iDeviceIndex]->ActivateObject(IID_PPV_ARGS(&spSource));
             if (FAILED(hr))
             {
-                wprintf(L"failed ActivateObject: %08LX\n", hr);
+                wprintf(L"failed ActivateObject: %08X\n", hr);
                 goto error;
             }
         }
 
-        hr = spEngineFactory.CoCreateInstance(CLSID_MFCaptureEngineClassFactory);
+        hr = CoCreateInstance(
+            CLSID_MFCaptureEngineClassFactory,
+            nullptr,
+            CLSCTX_ALL,
+            IID_PPV_ARGS(spEngineFactory.GetAddressOf()));
         if (FAILED(hr))
         {
-            wprintf(L"failed create engine factory: %08LX\n", hr);
+            wprintf(L"failed create engine factory: %08X\n", hr);
             goto error;
         }
 
         hr = spEngineFactory->CreateInstance(CLSID_MFCaptureEngine, IID_PPV_ARGS(&spEngine));
         if (FAILED(hr))
         {
-            wprintf(L"failed create MFCaptureEngine: %08LX\n", hr);
+            wprintf(L"failed create MFCaptureEngine: %08X\n", hr);
             goto error;
         }
 
         spCallback.Attach(new (std::nothrow) CaptureEngineCB());
         if (spCallback == NULL)
         {
-            wprintf(L"failed make callback: %08LX\n", hr);
+            wprintf(L"failed make callback: %08X\n", hr);
             hr = E_OUTOFMEMORY;
             goto error;
         }
 
-        hr = spEngine->Initialize(spCallback, nullptr, nullptr, spSource);
+        hr = spEngine->Initialize(spCallback.Get(), nullptr, nullptr, spSource.Get());
         if (FAILED(hr))
         {
-            wprintf(L"failed MFCaptureEngine initialize: %08LX\n", hr);
+            wprintf(L"failed MFCaptureEngine initialize: %08X\n", hr);
             goto error;
         }
 
@@ -566,10 +573,10 @@ wmain(
 
         Sleep(500);
 
-        hr = StartPreview(spEngine);
+        hr = StartPreview(spEngine.Get());
         if (FAILED(hr))
         {
-            wprintf(L"failed StartPreview: %08LX\n", hr);
+            wprintf(L"failed StartPreview: %08X\n", hr);
             goto error;
         }
 
@@ -581,10 +588,10 @@ wmain(
 
         wprintf(L"Taking photo...\n");
 
-        hr = TakePhoto(spEngine, wszOutputPath, pxWidth, pxHeight);
+        hr = TakePhoto(spEngine.Get(), wszOutputPath, pxWidth, pxHeight);
         if (FAILED(hr))
         {
-            wprintf(L"failed TakePhoto: %08LX\n", hr);
+            wprintf(L"failed TakePhoto: %08X\n", hr);
             goto error;
         }
 
@@ -615,12 +622,17 @@ error:
 
 STDMETHODIMP CaptureEngineCB::QueryInterface(REFIID riid, void** ppv)
 {
-    static const QITAB qit[] = 
+    HRESULT hr;
+    if (riid == __uuidof(IMFCaptureEngineOnEventCallback))
     {
-        QITABENT(CaptureEngineCB, IMFCaptureEngineOnEventCallback),
-        { 0 }
-    };
-    return QISearch(this, qit, riid, ppv);
+        *ppv = static_cast<IMFCaptureEngineOnEventCallback*>(this);
+        hr = S_OK;
+    }
+    else
+    {
+        hr = E_NOINTERFACE;
+    }
+    return hr;
 }
 
 STDMETHODIMP_(ULONG) CaptureEngineCB::AddRef()
@@ -647,12 +659,17 @@ STDMETHODIMP CaptureEngineCB::OnEvent( _In_ IMFMediaEvent* pEvent)
 
 STDMETHODIMP SampleCB::QueryInterface(REFIID riid, void** ppv)
 {
-    static const QITAB qit[] = 
+    HRESULT hr;
+    if (riid == __uuidof(IMFCaptureEngineOnSampleCallback))
     {
-        QITABENT(SampleCB, IMFCaptureEngineOnSampleCallback),
-        { 0 }
-    };
-    return QISearch(this, qit, riid, ppv);
+        *ppv = static_cast<IMFCaptureEngineOnSampleCallback*>(this);
+        hr = S_OK;
+    }
+    else
+    {
+        hr = E_NOINTERFACE;
+    }
+    return hr;
 }
 
 STDMETHODIMP_(ULONG) SampleCB::AddRef()
