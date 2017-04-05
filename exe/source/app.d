@@ -14,7 +14,6 @@ import std.typecons;
 import std.array;
 
 import core.sys.windows.windows;
-import windows_serial;
 
 import graphite.twitter;
 
