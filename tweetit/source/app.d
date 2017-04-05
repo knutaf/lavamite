@@ -63,26 +63,29 @@ void tweetText(string textToTweet)
     Twitter.statuses.update(g_twitterInfo.accessToken, parms);
 }
 
-void tweetTextAndPhoto(string textToTweet, string photoPath)
+void tweetTextAndPhoto(string textToTweet, string photoPath, string mimeType, Twitter.MediaCategory mediaCategory)
 {
     string[string] parms;
     parms["status"] = textToTweet;
 
     log("Tweeting \"%s\" with image %s", textToTweet, photoPath);
 
-    Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, photoPath, parms);
+    Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, photoPath, mimeType, mediaCategory, parms);
     //writefln("twitter output: %s", Twitter.media.upload(g_twitterInfo.accessToken, photoPath));
 }
 
 void usage()
 {
-    writefln("tweetit [-img image_path] \"tweet text\"");
+    writefln("tweetit [-img image_path | -gif gif_path | -vid vid_path] \"tweet text\"");
 }
 
 int main(string[] args)
 {
     string textToTweet = null;
     string imagePath = null;
+    string mimeType = null;
+    Twitter.MediaCategory mediaCategory = Twitter.MediaCategory.TweetImage;
+    string proxy = null;
     uint i;
     uint lastUsedArg = 0;
     for (i = 1; i < args.length; i++)
@@ -93,6 +96,65 @@ int main(string[] args)
             if (i < args.length)
             {
                 imagePath = args[i];
+                mediaCategory = Twitter.MediaCategory.TweetImage;
+                lastUsedArg = i;
+            }
+            else
+            {
+                usage();
+                return 1;
+            }
+        }
+        else if (cmp(args[i], "-gif") == 0)
+        {
+            i++;
+            if (i < args.length)
+            {
+                imagePath = args[i];
+                mediaCategory = Twitter.MediaCategory.TweetGif;
+                lastUsedArg = i;
+            }
+            else
+            {
+                usage();
+                return 1;
+            }
+        }
+        else if (cmp(args[i], "-vid") == 0)
+        {
+            i++;
+            if (i < args.length)
+            {
+                imagePath = args[i];
+                mediaCategory = Twitter.MediaCategory.TweetVideo;
+                lastUsedArg = i;
+            }
+            else
+            {
+                usage();
+                return 1;
+            }
+        }
+        else if (cmp(args[i], "-mime") == 0)
+        {
+            i++;
+            if (i < args.length)
+            {
+                mimeType = args[i];
+                lastUsedArg = i;
+            }
+            else
+            {
+                usage();
+                return 1;
+            }
+        }
+        else if (cmp(args[i], "-proxy") == 0)
+        {
+            i++;
+            if (i < args.length)
+            {
+                proxy = args[i];
                 lastUsedArg = i;
             }
             else
@@ -114,6 +176,8 @@ int main(string[] args)
         return 1;
     }
 
+    Twitter.proxy = proxy;
+
     if (textToTweet !is null)
     {
         g_rootPath = dirName(thisExePath());
@@ -123,7 +187,7 @@ int main(string[] args)
 
         if (imagePath !is null)
         {
-            tweetTextAndPhoto(textToTweet, imagePath);
+            tweetTextAndPhoto(textToTweet, imagePath, mimeType, mediaCategory);
         }
         else
         {
