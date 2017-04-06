@@ -53,25 +53,39 @@ void processConfigFile()
     g_twitterInfo = twitterInfo;
 }
 
-void tweetText(string textToTweet)
+void tweetText(string textToTweet, string replyToId)
 {
     string[string] parms;
     parms["status"] = textToTweet;
 
-    log("Tweeting \"%s\"", textToTweet);
+    if (replyToId !is null)
+    {
+        parms[`in_reply_to_status_id`] = replyToId;
+        log("Tweeting \"%s\" in reply to %s", textToTweet, replyToId);
+    }
+    else
+    {
+        log("Tweeting \"%s\"", textToTweet);
+    }
 
-    Twitter.statuses.update(g_twitterInfo.accessToken, parms);
+    JSONValue response = parseJSON(Twitter.statuses.update(g_twitterInfo.accessToken, parms));
+    log("%s", response.toPrettyString());
 }
 
-void tweetTextAndPhoto(string textToTweet, string photoPath, string mimeType, Twitter.MediaCategory mediaCategory)
+void tweetTextAndPhoto(string textToTweet, string replyToId, string photoPath, string mimeType, Twitter.MediaCategory mediaCategory)
 {
     string[string] parms;
     parms["status"] = textToTweet;
+
+    if (replyToId !is null)
+    {
+        parms[`in_reply_to_status_id`] = replyToId;
+    }
 
     log("Tweeting \"%s\" with image %s", textToTweet, photoPath);
 
-    Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, photoPath, mimeType, mediaCategory, parms);
-    //writefln("twitter output: %s", Twitter.media.upload(g_twitterInfo.accessToken, photoPath));
+    JSONValue response = parseJSON(Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, photoPath, mimeType, mediaCategory, parms));
+    log("%s", response.toPrettyString());
 }
 
 void usage()
@@ -84,6 +98,7 @@ int main(string[] args)
     string textToTweet = null;
     string imagePath = null;
     string mimeType = null;
+    string replyToId = null;
     Twitter.MediaCategory mediaCategory = Twitter.MediaCategory.TweetImage;
     string proxy = null;
     uint i;
@@ -163,6 +178,20 @@ int main(string[] args)
                 return 1;
             }
         }
+        else if (cmp(args[i], "-reply") == 0)
+        {
+            i++;
+            if (i < args.length)
+            {
+                replyToId = args[i];
+                lastUsedArg = i;
+            }
+            else
+            {
+                usage();
+                return 1;
+            }
+        }
     }
 
     lastUsedArg++;
@@ -187,11 +216,11 @@ int main(string[] args)
 
         if (imagePath !is null)
         {
-            tweetTextAndPhoto(textToTweet, imagePath, mimeType, mediaCategory);
+            tweetTextAndPhoto(textToTweet, replyToId, imagePath, mimeType, mediaCategory);
         }
         else
         {
-            tweetText(textToTweet);
+            tweetText(textToTweet, replyToId);
         }
     }
 
