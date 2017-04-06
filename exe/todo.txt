@@ -1,5 +1,15 @@
-- split windows comm into a separate library
 - understand shared better, and make sure we're using it right
+
+for video encoding:
+WORKS - implement averageGrayscale
+WORKS - once cooldown starts, copy all relevant images to a temp folder
+  WORKS - experiment multithread file processing
+- config flag with ffmpeg path
+- config flag for video bitrate
+WORKS - run ffmpeg
+WORKS - upload video
+- flag in status file to say whether a video was successfully uploaded?
+- retries for upload?
 
     knutaf2
     "twitterInfo": {
