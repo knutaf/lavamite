@@ -1,15 +1,15 @@
 - understand shared better, and make sure we're using it right
 
 for video encoding:
-WORKS - implement averageGrayscale
-WORKS - once cooldown starts, copy all relevant images to a temp folder
-  WORKS - experiment multithread file processing
-- config flag with ffmpeg path
-- config flag for video bitrate
-WORKS - run ffmpeg
-WORKS - upload video
-- flag in status file to say whether a video was successfully uploaded?
-- retries for upload?
+DONE - implement averageGrayscale
+DONE - once cooldown starts, copy all relevant images to a temp folder
+  DONE - experiment multithread file processing
+DONE - config flag with ffmpeg path
+DONE - config flag for video bitrate
+DONE - run ffmpeg
+DONE - upload video
+NO - flag in status file to say whether a video was successfully uploaded?
+NO - retries for upload?
 
     knutaf2
     "twitterInfo": {
