@@ -26,6 +26,7 @@ string g_statusFile;
 shared bool g_forReals;
 Tid g_loggingThread;
 uint g_testPhotoNum = 1;
+immutable bool g_allowTweetingInDryRun = false;
 
 shared Round g_currentRound;
 TwitterInfo g_twitterInfo;
@@ -1081,9 +1082,10 @@ string tweetTextAndMedia(string textToTweet, string inReplyToId, string mediaPat
     log(`Tweeting "%s" in reply to %s with media %s (%s, %s)`, textToTweet, inReplyToId !is null ? inReplyToId : `nothing`, mediaPath, mimeType, mediaCategory);
 
     string tweetId;
-    if (g_forReals)
+    if (g_forReals || g_allowTweetingInDryRun)
     {
-        JSONValue response = Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, mediaPath, mimeType, mediaCategory, parms);
+        JSONValue response = parseJSON(Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, mediaPath, mimeType, mediaCategory, parms));
+        log("%s", response.toPrettyString());
         tweetId = response[`id_str`].str;
     }
     else
