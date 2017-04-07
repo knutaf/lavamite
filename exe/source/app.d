@@ -1222,6 +1222,7 @@ void encodeAndPostVideoOfRound()
 
     mkdirRecurse(encodingTempDir);
 
+    uint numSkippedBlackFrames = 0;
     foreach (string photoFilename; dirEntries(inputFolder, `*.jpg`, SpanMode.shallow))
     {
         IFImage im = read_image(photoFilename, ColFmt.RGB);
@@ -1234,6 +1235,7 @@ void encodeAndPostVideoOfRound()
         else
         {
             log("skipping %s because it's too dark", photoFilename);
+            numSkippedBlackFrames++;
         }
     }
 
@@ -1253,7 +1255,17 @@ void encodeAndPostVideoOfRound()
     log(`ffmpeg result: %s`, ffmpegResult);
 
     assert(g_currentRound.postedImageTweetId !is null);
-    tweetTextAndVideo(format("t=%s", g_clock.currTime.toISOString()), g_currentRound.postedImageTweetId, outputVideoFilename);
+    string tweetText;
+    if (numSkippedBlackFrames > 0)
+    {
+        tweetText = format(`Round %u timelapse: %u frames, 1 min apart. Skipped %u dark frames.`, g_currentRound.number, frameNumber, numSkippedBlackFrames);
+    }
+    else
+    {
+        tweetText = format(`Round %u timelapse: %u frames, 1 min apart.`, g_currentRound.number, frameNumber);
+    }
+
+    tweetTextAndVideo(tweetText, g_currentRound.postedImageTweetId, outputVideoFilename);
 }
 
 //
