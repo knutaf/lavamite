@@ -762,6 +762,7 @@ int main(string[] args)
             // finish warming up the lamp all the way, so it cools down into
             // its settled state rather than freezing in a formation.
             //
+            bool completingStabilization = false;
             if (g_clock.currTime < g_currentRound.stabilizationInterval.end)
             {
                 inSomePhase = true;
@@ -790,10 +791,7 @@ int main(string[] args)
                     break;
                 }
 
-                if (g_tuningConfig.isVideoEnabled)
-                {
-                    encodeAndPostVideoOfRound();
-                }
+                completingStabilization = true;
             }
 
             //
@@ -806,6 +804,14 @@ int main(string[] args)
             if (g_clock.currTime < g_currentRound.cooldownInterval.end)
             {
                 inSomePhase = true;
+
+                // Only post the video if we just finished the stabilization
+                // phase. If we restart straight into cooldown, don't post it
+                // again.
+                if (completingStabilization && g_tuningConfig.isVideoEnabled)
+                {
+                    encodeAndPostVideoOfRound();
+                }
 
                 Duration remainingCooldownTime = g_currentRound.cooldownInterval.end - g_clock.currTime + dur!"seconds"(5);
                 log("Cooling down for %s until next session", stripFracSeconds(remainingCooldownTime));
