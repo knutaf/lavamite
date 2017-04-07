@@ -60,7 +60,8 @@
         "rangeActiveCycleTimeSeconds": [60, 600],
 
         "_":"TODO: doc",
-        "isVideoEnabled": true,
+        "videoBitrate": 1000000,
+        "ffmpegPath": "c:\\temp\\ffmpeg.exe",
 
         "_":"end"
     }
