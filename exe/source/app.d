@@ -12,10 +12,12 @@ import std.json;
 import core.thread;
 import std.typecons;
 import std.array;
-
+import std.parallelism;
+import core.atomic;
 import core.sys.windows.windows;
 
 import graphite.twitter;
+import imageformats;
 
 shared string g_rootPath;
 shared PrivateClock g_clock;
@@ -23,12 +25,11 @@ shared string g_configFile;
 string g_statusFile;
 shared bool g_forReals;
 Tid g_loggingThread;
+uint g_testPhotoNum = 1;
 
 shared Round g_currentRound;
 TwitterInfo g_twitterInfo;
 TuningConfig g_tuningConfig;
-
-immutable uint MINS_PER_HOUR = 60;
 
 enum WarmUpTimeHandling
 {
@@ -221,8 +222,8 @@ void fnLoggingThread()
 
 //
 // this thread sits in the background and takes photos periodically, to help
-// with tuning. it only takes photos while the lamp is on, because who cares
-// what it looks like when it's off?
+// with tuning. it only takes photos while actively in a round, because who
+// cares what it looks like during cooldown between rounds?
 //
 void fnPhotoThread(Tid loggingThread, shared LavaCam camera)
 {
@@ -266,7 +267,13 @@ void fnPhotoThread(Tid loggingThread, shared LavaCam camera)
                 //
                 // wait a while until taking the next picture
                 //
-                receiveTimeout(dur!"minutes"(1), &setLampState);
+                Duration sleepTimeUntilNextPhoto = dur!`minutes`(1);
+                if (!g_forReals)
+                {
+                    sleepTimeUntilNextPhoto = getDrySleepDuration(sleepTimeUntilNextPhoto);
+                }
+
+                receiveTimeout(sleepTimeUntilNextPhoto, &setLampState);
             }
             else
             {
@@ -370,6 +377,27 @@ bool sleepWithExitCheck(Duration d)
 {
     auto sleepResult = sleepHowLongWithExitCheck(d);
     return sleepResult.isExitRequested;
+}
+
+//
+// Steal formula from Wikipedia to calculate grayscale based on RGB values
+//
+float averageGrayscale(ref IFImage image)
+{
+    float average = 0;
+    immutable uint totalPixels = image.w * image.h;
+    for (uint pixelIndex = 0; pixelIndex < totalPixels; pixelIndex++)
+    {
+        uint valueIndex = pixelIndex * image.c;
+        float grayscale = cast(int)(0.299 * image.pixels[valueIndex]) +
+                          cast(int)(0.587 * image.pixels[valueIndex+1]) +
+                          cast(int)(0.114 * image.pixels[valueIndex+2]);
+        average *= pixelIndex;
+        average += grayscale;
+        average /= (pixelIndex+1);
+    }
+
+    return average;
 }
 
 int main(string[] args)
@@ -1173,22 +1201,57 @@ void takeAndPostPhoto(shared LavaCam camera)
 
 void encodeAndPostVideoOfRound()
 {
-    string outputPath = buildPath(g_currentRound.roundFolder, "round.mp4");
-    if (g_forReals)
+    // out of 255 max
+    immutable float DARKNESS_CUTOFF = 15.0;
+
+    string inputFolder = g_currentRound.roundFolder;
+    string outputVideoFilename = buildPath(inputFolder, "round.mp4");
+
+    string encodingTempDir = buildPath(tempDir(), "lavamite_encode");
+    try
     {
+        rmdirRecurse(encodingTempDir);
+        Thread.sleep(dur!`seconds`(1));
     }
-    else
+    catch (Throwable ex)
     {
-         //
-         // in dry run mode, create a file so we can see that the
-         // filename and path is correct, but don't put anything in it,
-         // and don't call it a .mp4, lest it confuse the OS or something
-         //
-         File fakePhoto = File(format("%s_fake", outputPath), "w");
+        log("Exception removing temp dir");
     }
 
+    mkdirRecurse(encodingTempDir);
+
+    foreach (string photoFilename; dirEntries(inputFolder, `*.jpg`, SpanMode.shallow))
+    {
+        IFImage im = read_image(photoFilename, ColFmt.RGB);
+        if (averageGrayscale(im) >= DARKNESS_CUTOFF)
+        {
+            string includedPhotoFilename = buildPath(encodingTempDir, baseName(photoFilename));
+            log("copying from %s to %s", photoFilename, includedPhotoFilename);
+            std.file.copy(photoFilename, includedPhotoFilename);
+        }
+        else
+        {
+            log("skipping %s because it's too dark", photoFilename);
+        }
+    }
+
+    uint frameNumber = 0;
+    foreach (string filename; dirEntries(encodingTempDir, `*_r*.jpg`, SpanMode.shallow))
+    {
+        string frameFilename = buildPath(encodingTempDir, format(`%u.jpg`, frameNumber));
+        log("renaming from %s to %s", baseName(filename), baseName(frameFilename));
+        std.file.rename(filename, frameFilename);
+        frameNumber++;
+    }
+
+    assert(g_tuningConfig.videoBitrate != 0);
+    string ffmpegCommand = format(`%s -y -framerate 13 -i %s\%%d.jpg -c:v libx264 -preset veryslow -b:v %u %s`, g_tuningConfig.ffmpegPath, encodingTempDir, g_tuningConfig.videoBitrate, outputVideoFilename);
+    log(`%s`, ffmpegCommand);
+    auto ffmpegResult = executeShell(ffmpegCommand);
+    log(`ffmpeg result: %s`, ffmpegResult);
+
     assert(g_currentRound.postedImageTweetId !is null);
-    tweetTextAndVideo(format("t=%s", g_clock.currTime.toISOString()), g_currentRound.postedImageTweetId, outputPath);
+    tweetTextAndVideo(format("t=%s", g_clock.currTime.toISOString()), g_currentRound.postedImageTweetId, outputVideoFilename);
 }
 
 //
@@ -1888,12 +1951,25 @@ class LavaCam
         }
         else
         {
-             //
-             // in dry run mode, create a file so we can see that the
-             // filename and path is correct, but don't put anything in it,
-             // and don't call it a .jpg, lest it confuse the OS or something
-             //
-             File fakePhoto = File(format("%s_fake", outputPath), "w");
+            //
+            // Try copying the next test image to the round folder in place of
+            // a real photo from a camera. If we fail to copy it, assume we ran
+            // out of test photos and try again, starting from test photo #1.
+            //
+            for (uint i = 0; i < 2; i++)
+            {
+                string testPhotoPath = buildPath(g_rootPath, `test`, format(`%u.jpg`, g_testPhotoNum));
+                try
+                {
+                    std.file.copy(testPhotoPath, outputPath);
+                    g_testPhotoNum++;
+                    break;
+                }
+                catch (Throwable ex)
+                {
+                    g_testPhotoNum = 1;
+                }
+            }
         }
     }
 
