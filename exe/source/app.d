@@ -138,11 +138,6 @@ unittest
      assert(formatDurationToHoursMins(dur!"minutes"(659)) == "10h 59m");
 }
 
-string formatRoundFolder(shared Round r)
-{
-    return buildPath(g_rootPath, format("round_%04d_%s", r.number, formatTimeToSeconds(r.originalStartTime)));
-}
-
 void ensureFolder(string folderPath)
 {
     if (!exists(folderPath))
@@ -193,10 +188,9 @@ void fnLoggingThread()
             //
             if (g_currentRound !is null)
             {
-                string newLogFolder = formatRoundFolder(g_currentRound);
-                if (logFolder is null || (cmp(newLogFolder, logFolder) != 0))
+                if (logFolder is null || (cmp(g_currentRound.roundFolder, logFolder) != 0))
                 {
-                    logFolder = newLogFolder;
+                    logFolder = g_currentRound.roundFolder;
                     logFile = File(buildPath(logFolder, "lavamite.log"), "a");
 
                     string roundConfigPath = buildPath(logFolder, getConfigFileName());
@@ -446,9 +440,6 @@ int main(string[] args)
     processStatusFile();
     processConfigFile();
 
-    takeAndPostVideoOfRound();
-    Thread.sleep(dur!"seconds"(30));
-
     //
     // at this point, g_currentRound is set
     //
@@ -606,7 +597,9 @@ int main(string[] args)
                         warmUpActiveTime,            // remaining active
                         warmUpInactiveTime,          // remaining inactive
                         stabilizationTime,           // stabilization time
-                        cooldownTime));              // cooldown time
+                        cooldownTime,                // cooldown time
+                        null                         // posted image tweet id
+                        ));
 
                 log("********* STARTING ROUND: %s", g_currentRound.formatForLogging());
             }
@@ -797,7 +790,10 @@ int main(string[] args)
                     break;
                 }
 
-                takeAndPostVideoOfRound();
+                if (g_tuningConfig.isVideoEnabled)
+                {
+                    encodeAndPostVideoOfRound();
+                }
             }
 
             //
@@ -918,7 +914,9 @@ void processStatusFile()
                 dur!"seconds"(1),     // remaining warmup active time
                 Duration.zero(),      // remaining warmup inactive
                 dur!"seconds"(1),     // stabilization time
-                dur!"hours"(4));      // cooldown time
+                dur!"hours"(4),       // cooldown time
+                null                  // posted image tweet id
+                );
 
         //
         // if missing the status file, put us 1 second after the end of the
@@ -945,7 +943,8 @@ void processStatusFile()
             rs.remainingWarmUpActiveTime,
             rs.remainingWarmUpInactiveTime,
             rs.stabilizationTime,
-            rs.cooldownTime));
+            rs.cooldownTime,
+            rs.postedImageTweetId));
 }
 
 //
@@ -1029,23 +1028,46 @@ void setCurrentRound(Round r)
 {
     // TODO: need to understand this cast better
     shared Round rs = cast(shared Round)r;
-    ensureFolder(formatRoundFolder(rs));
+    ensureFolder(rs.roundFolder);
 
     g_currentRound = rs;
     writeStatusFile();
 }
 
-void tweetTextAndPhoto(string textToTweet, string photoPath)
+string tweetTextAndMedia(string textToTweet, string inReplyToId, string mediaPath, string mimeType, Twitter.MediaCategory mediaCategory)
 {
     string[string] parms;
     parms["status"] = textToTweet;
 
-    log("Tweeting \"%s\" with image %s", textToTweet, photoPath);
+    if (inReplyToId !is null)
+    {
+        parms[`in_reply_to_status_id`] = inReplyToId;
+    }
 
+    log(`Tweeting "%s" in reply to %s with media %s (%s, %s)`, textToTweet, inReplyToId !is null ? inReplyToId : `nothing`, mediaPath, mimeType, mediaCategory);
+
+    string tweetId;
     if (g_forReals)
     {
-        Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, photoPath, parms);
+        JSONValue response = Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, mediaPath, mimeType, mediaCategory, parms);
+        tweetId = response[`id_str`].str;
     }
+    else
+    {
+        tweetId = format("%u", uniform(1000000, 2000000));
+    }
+
+    return tweetId;
+}
+
+string tweetTextAndPhoto(string textToTweet, string photoPath)
+{
+    return tweetTextAndMedia(textToTweet, null, photoPath, `image/jpeg`, Twitter.MediaCategory.TweetImage);
+}
+
+string tweetTextAndVideo(string textToTweet, string postedImageTweetId, string photoPath)
+{
+    return tweetTextAndMedia(textToTweet, postedImageTweetId, photoPath, `video/mp4`, Twitter.MediaCategory.TweetVideo);
 }
 
 void takeAndPostPhoto(shared LavaCam camera)
@@ -1140,30 +1162,27 @@ void takeAndPostPhoto(shared LavaCam camera)
         break;
     }
 
-    tweetTextAndPhoto(textToTweet, photoPath);
+    g_currentRound.postedImageTweetId = tweetTextAndPhoto(textToTweet, photoPath);
 }
 
-void takeAndPostVideoOfRound()
+void encodeAndPostVideoOfRound()
 {
-    if (g_tuningConfig.isVideoEnabled)
+    string outputPath = buildPath(g_currentRound.roundFolder, "round.mp4");
+    if (g_forReals)
     {
-        string roundFolder = `F:\knut\prog\lavamite\lavamite\round_0270_20141228-1701.00`;
-
-        string command = format(`cmd.exe /c encode_round_as_vid.cmd %s`, roundFolder);
-        log(command);
-        auto result = executeShell(command);
-        if (result.status != 0)
-        {
-            log(result.output);
-            throw new Exception(format("failed encode: %d", result.status), result.output);
-        }
-
-        log("done");
-
-        tweetTextAndMedia(format("t=%s", g_clock.currTime.toISOString()), buildPath(roundFolder, "round.mp4"));
-
-        log("done");
     }
+    else
+    {
+         //
+         // in dry run mode, create a file so we can see that the
+         // filename and path is correct, but don't put anything in it,
+         // and don't call it a .mp4, lest it confuse the OS or something
+         //
+         File fakePhoto = File(format("%s_fake", outputPath), "w");
+    }
+
+    assert(g_currentRound.postedImageTweetId !is null);
+    tweetTextAndVideo(format("t=%s", g_clock.currTime.toISOString()), g_currentRound.postedImageTweetId, outputPath);
 }
 
 //
@@ -1330,6 +1349,8 @@ class Round
     private Duration m_remainingWarmUpInactiveTime;
     private Duration m_stabilizationTime;
     private Duration m_cooldownTime;
+    private string m_postedImageTweetId;
+    private string m_roundFolder;
 
     public this(
         uint number,
@@ -1342,7 +1363,8 @@ class Round
         Duration remainingWarmUpActiveTime,
         Duration remainingWarmUpInactiveTime,
         Duration stabilizationTime,
-        Duration cooldownTime)
+        Duration cooldownTime,
+        string postedImageTweetId)
     {
         this.m_number = number;
         m_startTime = startTime.stdTime;
@@ -1356,6 +1378,10 @@ class Round
         m_remainingWarmUpInactiveTime = remainingWarmUpInactiveTime;
         m_stabilizationTime = stabilizationTime;
         m_cooldownTime = cooldownTime;
+
+        m_postedImageTweetId = postedImageTweetId;
+
+        m_roundFolder = buildPath(g_rootPath, format("round_%04d_%s", number, formatTimeToSeconds(originalStartTime)));
     }
 
     @property public shared pure uint number()
@@ -1470,6 +1496,21 @@ class Round
         return m_cooldownTime;
     }
 
+    @property public shared pure string postedImageTweetId()
+    {
+        return m_postedImageTweetId;
+    }
+
+    @property public shared pure void postedImageTweetId(string value)
+    {
+        m_postedImageTweetId = value;
+    }
+
+    @property public shared pure string roundFolder()
+    {
+        return m_roundFolder;
+    }
+
     //
     // cooldown time starts after the stabilization time ends
     //
@@ -1550,7 +1591,8 @@ class Round
                 "remainingWarmUpActiveSeconds" : JSONValue(remainingWarmUpActiveTime().total!"seconds"()),
                 "remainingWarmUpInactiveSeconds" : JSONValue(remainingWarmUpInactiveTime().total!"seconds"()),
                 "stabilizationSeconds" : JSONValue(stabilizationTime().total!"seconds"()),
-                "cooldownSeconds" : JSONValue(cooldownTime().total!"seconds"())
+                "cooldownSeconds" : JSONValue(cooldownTime().total!"seconds"()),
+                "postedImageTweetId" : JSONValue(postedImageTweetId())
             ]);
 
         return root;
@@ -1573,6 +1615,12 @@ class Round
         Duration remainingWarmUpInactiveTime = dur!"seconds"(root.object["remainingWarmUpInactiveSeconds"].integer);
         Duration stabilizationTime = dur!"seconds"(root.object["stabilizationSeconds"].integer);
         Duration cooldownTime = dur!"seconds"(root.object["cooldownSeconds"].integer);
+        string postedImageTweetId = null;
+        JSONValue* jvPostedImageTweetId = `postedImageTweetId` in root.object;
+        if (jvPostedImageTweetId !is null)
+        {
+            postedImageTweetId = jvPostedImageTweetId.str;
+        }
 
         return new Round(
                        round,
@@ -1585,7 +1633,8 @@ class Round
                        remainingWarmUpActiveTime,
                        remainingWarmUpInactiveTime,
                        stabilizationTime,
-                       cooldownTime);
+                       cooldownTime,
+                       postedImageTweetId);
     }
 }
 
@@ -1745,7 +1794,8 @@ struct TuningConfig
     NumberRange rangeWarmUpInactivePercentOfActiveSurplusBefore;
     DurationRange rangeActiveCycleTime;
     ulong[] choicesWarmUpTimeHandling;
-    bool isVideoEnabled;
+    string ffmpegPath;
+    ulong videoBitrate;
 
     public static TuningConfig fromJSON(JSONValue root)
     {
@@ -1769,9 +1819,15 @@ struct TuningConfig
 
         ti.choicesWarmUpTimeHandling = ulongArrayFromJSON(root.object["choicesWarmUpTimeHandling"], WarmUpTimeHandling.max+1);
 
-        ti.isVideoEnabled = root.object["isVideoEnabled"].type == JSON_TYPE.TRUE;
+        ti.ffmpegPath = root.object[`ffmpegPath`].str;
+        ti.videoBitrate = root.object[`videoBitrate`].integer;
 
         return ti;
+    }
+
+    @property public pure bool isVideoEnabled()
+    {
+        return videoBitrate != 0;
     }
 }
 
@@ -1842,7 +1898,7 @@ class LavaCam
     public shared const string takePhotoToPhotosFolder(string fileSuffix = "", bool showLog = false)
     {
         SysTime currTime = g_clock.currTime;
-        string photoPath = buildPath(formatRoundFolder(g_currentRound), format("%s_%s%s.jpg", currTime.toISOString(), g_currentRound.getRoundAndSecOffset(currTime), fileSuffix));
+        string photoPath = buildPath(g_currentRound.roundFolder(), format("%s_%s%s.jpg", currTime.toISOString(), g_currentRound.getRoundAndSecOffset(currTime), fileSuffix));
         takePhoto(photoPath, showLog);
         return photoPath;
     }
