@@ -10,6 +10,9 @@ if %errorlevel% NEQ 0 (
     goto :EOF
 )
 gitm master
-git rm -f merge_to_public.cmd
+git rm -f %~dp0\merge_to_public.cmd
+git rm -f %~dp0\exe\tuning_data.xlsx
+git rm -f %~dp0\exe\todo.txt
+git rm -f %~dp0\exe\encode_round_as_vid.cmd
 
 REM add more git rm -f lines here to remove other private files
