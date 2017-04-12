@@ -9,7 +9,7 @@ git checkout public
 if %errorlevel% NEQ 0 (
     goto :EOF
 )
-gitm master
+cmd /c gitm master
 git rm -f %~dp0\merge_to_public.cmd
 git rm -f %~dp0\exe\tuning_data.xlsx
 git rm -f %~dp0\exe\todo.txt
