@@ -59,7 +59,6 @@
         "_":"short can the period be? Switching every 1-10 minutes each time.",
         "rangeActiveCycleTimeSeconds": [60, 600],
 
-        "_":"TODO: doc",
         "videoBitrate": 1000000,
         "ffmpegPath": "c:\\temp\\ffmpeg.exe",
 
