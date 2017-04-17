@@ -1,5 +1,5 @@
 # LavaMite
-## A Twitter bot that captures lava lamps in the act of forming.
+## A Twitter bot that catches lava lamps in the act of forming.
 
 [LavaMite](https://twitter.com/lava_mite) is comprised of four components:
 * a lava lamp, of course
@@ -17,9 +17,10 @@
 1. Make note of which COM port the Arduino board is connected to
 1. Once you've wired up your Arduino to the power switch, you can test it manually by using the Arduino serial monitor with 9600 baud and sending the string `switch_1` or `switch_0`.
 1. Rename `lavamite_config_dry_SAMPLE.json` as `lavamite_config.json`, and fill in the authentication values for your Twitter app.
+1. If you want to enable time-lapse video support, fill in the `ffmpegPath` and set `videoBitrate` to something. `1000000` works reasonably well.
 1. Finally, run `lavamite.exe -live -com COM3 -cam 1`, substituting the camera device ID and COM port from above. If you only have one camera device, the `-cam` parameter can be omitted.
 
 That's it! The program should be running. To exit it, type `quit`, and it should save its progress and pick up where you left off next time.
 
-! More Information
+# More Information
 I wrote [a blog introducing LavaMite](https://barncover.blogspot.com/2014/05/lavamite-it-out-now.html), and [some more details about its development](https://barncover.blogspot.com/2014/06/developing-lavamite.html).
