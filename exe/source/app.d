@@ -148,6 +148,35 @@ void ensureFolder(string folderPath)
     }
 }
 
+int executeShellWithWait(string command, Duration waitTime)
+{
+    auto pid = spawnShell(command);
+    auto waitResult = tryWait(pid);
+    Duration nextWaitDuration = dur!`seconds`(1);
+    while (!waitResult.terminated && waitTime > Duration.zero)
+    {
+        if (nextWaitDuration > waitTime)
+        {
+            nextWaitDuration = waitTime;
+        }
+
+        Thread.sleep(nextWaitDuration);
+        waitResult = tryWait(pid);
+    }
+
+    int exitCode;
+    if (waitResult.terminated)
+    {
+        exitCode = waitResult.status;
+    }
+    else
+    {
+        exitCode = -10;
+    }
+
+    return exitCode;
+}
+
 void log(Args...)(string fmt, Args args)
 {
     send(g_loggingThread, format(fmt, args));
@@ -1957,10 +1986,10 @@ class LavaCam
 
         if (g_forReals)
         {
-            auto result = executeShell(takePhotoCommand);
-            if (result.status != 0)
+            int status = executeShellWithWait(takePhotoCommand, dur!`minutes`(1));
+            if (status != 0)
             {
-                throw new TakePhotoException(format("failed takephoto: %d", result.status), result.output);
+                throw new TakePhotoException(format("failed takephoto: %d", status), `unknown`);
             }
         }
         else
