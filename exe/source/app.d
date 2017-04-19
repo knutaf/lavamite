@@ -26,7 +26,7 @@ string g_statusFile;
 shared bool g_forReals;
 Tid g_loggingThread;
 uint g_testPhotoNum = 1;
-immutable bool g_allowTweetingInDryRun = false;
+bool g_allowTweetingInDryRun = false;
 
 shared Round g_currentRound;
 TwitterInfo g_twitterInfo;
@@ -482,6 +482,23 @@ int main(string[] args)
         else if (cmp(args[i], "-live") == 0)
         {
             g_forReals = true;
+        }
+        else if (cmp(args[i], "-dryTweet") == 0)
+        {
+            g_allowTweetingInDryRun = true;
+        }
+        else if (cmp(args[i], "-httpProxy") == 0)
+        {
+            i++;
+            if (i < args.length)
+            {
+                Twitter.proxy = args[i];
+            }
+            else
+            {
+                usage("need argument for -httpProxy");
+                return 1;
+            }
         }
         else
         {
@@ -1113,9 +1130,29 @@ string tweetTextAndMedia(string textToTweet, string inReplyToId, string mediaPat
     string tweetId;
     if (g_forReals || g_allowTweetingInDryRun)
     {
-        JSONValue response = parseJSON(Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, mediaPath, mimeType, mediaCategory, parms));
-        log("%s", response.toPrettyString());
-        tweetId = response[`id_str`].str;
+        immutable uint tweetAttempts = 5;
+        foreach (uint i; 1 .. tweetAttempts+1)
+        {
+            try
+            {
+                JSONValue response = parseJSON(Twitter.statuses.updateWithMedia(g_twitterInfo.accessToken, mediaPath, mimeType, mediaCategory, parms));
+                log("%s", response.toPrettyString());
+                tweetId = response[`id_str`].str;
+                break;
+            }
+            catch (Throwable ex)
+            {
+                string msg = format("failure number %d to tweet: %s", i, ex);
+                if (i == tweetAttempts)
+                {
+                    throw new Exception(msg);
+                }
+                else
+                {
+                    log(msg);
+                }
+            }
+        }
     }
     else
     {
